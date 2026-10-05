@@ -24,7 +24,7 @@ def ambil_harga(symbol):
         print(f"Error ambil {symbol}: {e}")
     return None, None
 
-# ============ AMBIL DATA OHLC (H4) ============
+# ============ AMBIL DATA OHLC ============
 def ambil_ohlc(symbol, interval="1h", range_="1mo"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -36,7 +36,6 @@ def ambil_ohlc(symbol, interval="1h", range_="1mo"):
         highs = quote["high"]
         lows = quote["low"]
         closes = quote["close"]
-        # Filter None
         data_bersih = []
         for i in range(len(highs)):
             if highs[i] is not None and lows[i] is not None and closes[i] is not None:
@@ -56,7 +55,6 @@ def deteksi_swing(data, kiri=2, kanan=2):
     swing_lows = []
     
     for i in range(kiri, len(data) - kanan):
-        # Cek swing high
         is_swing_high = True
         for j in range(1, kiri + 1):
             if data[i]["high"] <= data[i - j]["high"]:
@@ -67,12 +65,8 @@ def deteksi_swing(data, kiri=2, kanan=2):
                 is_swing_high = False
                 break
         if is_swing_high:
-            swing_highs.append({
-                "index": i,
-                "harga": data[i]["high"]
-            })
+            swing_highs.append({"index": i, "harga": data[i]["high"]})
         
-        # Cek swing low
         is_swing_low = True
         for j in range(1, kiri + 1):
             if data[i]["low"] >= data[i - j]["low"]:
@@ -83,10 +77,7 @@ def deteksi_swing(data, kiri=2, kanan=2):
                 is_swing_low = False
                 break
         if is_swing_low:
-            swing_lows.append({
-                "index": i,
-                "harga": data[i]["low"]
-            })
+            swing_lows.append({"index": i, "harga": data[i]["low"]})
     
     return swing_highs, swing_lows
 
@@ -95,13 +86,11 @@ def analisis_trend(swing_highs, swing_lows):
     if len(swing_highs) < 2 or len(swing_lows) < 2:
         return "DATA KURANG", "Butuh minimal 2 swing high & 2 swing low"
     
-    # Ambil 2 swing terakhir
     sh_terakhir = swing_highs[-1]["harga"]
     sh_sebelum = swing_highs[-2]["harga"]
     sl_terakhir = swing_lows[-1]["harga"]
     sl_sebelum = swing_lows[-2]["harga"]
     
-    # Deteksi HH, HL, LH, LL
     if sh_terakhir > sh_sebelum:
         struktur_high = "HH (Higher High)"
         bias_high = "bullish"
@@ -116,7 +105,6 @@ def analisis_trend(swing_highs, swing_lows):
         struktur_low = "LL (Lower Low)"
         bias_low = "bearish"
     
-    # Tentukan trend
     if bias_high == "bullish" and bias_low == "bullish":
         trend = "BULLISH"
     elif bias_high == "bearish" and bias_low == "bearish":
@@ -125,8 +113,35 @@ def analisis_trend(swing_highs, swing_lows):
         trend = "RANGING"
     
     keterangan = f"High: {struktur_high}\nLow: {struktur_low}"
-    
     return trend, keterangan
+
+# ============ DETEKSI BOS & MSS ============
+def deteksi_bos_mss(data, swing_highs, swing_lows, trend):
+    if len(swing_highs) < 1 or len(swing_lows) < 1:
+        return None, None
+    
+    harga_terakhir = data[-1]["close"]
+    sh_terakhir = swing_highs[-1]["harga"]
+    sl_terakhir = swing_lows[-1]["harga"]
+    
+    bos = None
+    mss = None
+    
+    # Cek BOS Bullish (harga break swing high terakhir)
+    if harga_terakhir > sh_terakhir:
+        if trend == "BULLISH":
+            bos = f"BOS BULLISH (break ${round(sh_terakhir, 2)})"
+        elif trend == "BEARISH":
+            mss = f"MSS BULLISH (break ${round(sh_terakhir, 2)}) - sinyal reversal"
+    
+    # Cek BOS Bearish (harga break swing low terakhir)
+    if harga_terakhir < sl_terakhir:
+        if trend == "BEARISH":
+            bos = f"BOS BEARISH (break ${round(sl_terakhir, 2)})"
+        elif trend == "BULLISH":
+            mss = f"MSS BEARISH (break ${round(sl_terakhir, 2)}) - sinyal reversal"
+    
+    return bos, mss
 
 # ============ MAIN ============
 print("Ambil data Gold...")
@@ -140,7 +155,6 @@ yield10, yield_chg = ambil_harga("^TNX")
 
 print("Ambil data OHLC Gold (H1)...")
 ohlc_gold = ambil_ohlc("GC=F", interval="1h", range_="1mo")
-
 print(f"Total candle: {len(ohlc_gold)}")
 
 # Deteksi swing
@@ -149,6 +163,12 @@ print(f"Swing High: {len(swing_highs)}, Swing Low: {len(swing_lows)}")
 
 # Analisis trend
 trend, keterangan = analisis_trend(swing_highs, swing_lows)
+print(f"Trend: {trend}")
+
+# Deteksi BOS & MSS
+bos, mss = deteksi_bos_mss(ohlc_gold, swing_highs, swing_lows, trend)
+print(f"BOS: {bos}")
+print(f"MSS: {mss}")
 
 # ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
@@ -182,6 +202,12 @@ if len(swing_highs) >= 2 and len(swing_lows) >= 2:
     
     pesan = pesan + "📈 *MARKET STRUCTURE:*\n"
     pesan = pesan + keterangan + "\n\n"
+
+if bos:
+    pesan = pesan + f"🔔 *{bos}*\n\n"
+
+if mss:
+    pesan = pesan + f"🚨 *{mss}*\n\n"
 
 # ============ KIRIM TELEGRAM ============
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
