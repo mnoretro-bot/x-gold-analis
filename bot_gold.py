@@ -60,13 +60,17 @@ def analisis_trend(sh, sl):
     if len(sh) < 2 or len(sl) < 2:
         return "RANGING", "Data kurang"
     if sh[-1]["harga"] > sh[-2]["harga"]:
-        h = "HH"; bh = "bullish"
+        h = "HH"
+        bh = "bullish"
     else:
-        h = "LH"; bh = "bearish"
+        h = "LH"
+        bh = "bearish"
     if sl[-1]["harga"] > sl[-2]["harga"]:
-        l = "HL"; bl = "bullish"
+        l = "HL"
+        bl = "bullish"
     else:
-        l = "LL"; bl = "bearish"
+        l = "LL"
+        bl = "bearish"
     if bh == "bullish" and bl == "bullish":
         return "BULLISH", f"{h} + {l}"
     elif bh == "bearish" and bl == "bearish":
@@ -80,11 +84,15 @@ def deteksi_bos_mss(data, sh, sl, trend):
     harga = data[-1]["close"]
     bos, mss = None, None
     if harga > sh[-1]["harga"]:
-        if trend == "BULLISH": bos = f"BOS Bullish (${round(sh[-1]['harga'], 2)})"
-        elif trend == "BEARISH": mss = f"MSS Bullish (${round(sh[-1]['harga'], 2)})"
+        if trend == "BULLISH":
+            bos = f"BOS Bullish (${round(sh[-1]['harga'], 2)})"
+        elif trend == "BEARISH":
+            mss = f"MSS Bullish (${round(sh[-1]['harga'], 2)})"
     if harga < sl[-1]["harga"]:
-        if trend == "BEARISH": bos = f"BOS Bearish (${round(sl[-1]['harga'], 2)})"
-        elif trend == "BULLISH": mss = f"MSS Bearish (${round(sl[-1]['harga'], 2)})"
+        if trend == "BEARISH":
+            bos = f"BOS Bearish (${round(sl[-1]['harga'], 2)})"
+        elif trend == "BULLISH":
+            mss = f"MSS Bearish (${round(sl[-1]['harga'], 2)})"
     return bos, mss
 
 # ============ ORDER BLOCK ============
@@ -122,37 +130,37 @@ def hitung_probabilitas(gold_chg, dxy_chg, yield_chg, trend):
     if gold_chg is not None:
         if gold_chg > 0.1:
             bobot["bullish"] += 20
-            alasan.append(f"Gold naik {round(gold_chg, 2)}% → Bullish (+20)")
+            alasan.append(f"Gold naik {round(gold_chg, 2)}% -> Bullish (+20)")
         elif gold_chg < -0.1:
             bobot["bearish"] += 20
-            alasan.append(f"Gold turun {round(gold_chg, 2)}% → Bearish (+20)")
+            alasan.append(f"Gold turun {round(gold_chg, 2)}% -> Bearish (+20)")
         else:
             bobot["netral"] += 20
-            alasan.append(f"Gold flat {round(gold_chg, 2)}% → Netral (+20)")
+            alasan.append(f"Gold flat {round(gold_chg, 2)}% -> Netral (+20)")
     
     # DXY (bobot 25) - korelasi negatif
     if dxy_chg is not None:
         if dxy_chg > 0.1:
             bobot["bearish"] += 25
-            alasan.append(f"DXY naik {round(dxy_chg, 2)}% → Bearish gold (+25)")
+            alasan.append(f"DXY naik {round(dxy_chg, 2)}% -> Bearish gold (+25)")
         elif dxy_chg < -0.1:
             bobot["bullish"] += 25
-            alasan.append(f"DXY turun {round(dxy_chg, 2)}% → Bullish gold (+25)")
+            alasan.append(f"DXY turun {round(dxy_chg, 2)}% -> Bullish gold (+25)")
         else:
             bobot["netral"] += 25
-            alasan.append(f"DXY flat {round(dxy_chg, 2)}% → Netral (+25)")
+            alasan.append(f"DXY flat {round(dxy_chg, 2)}% -> Netral (+25)")
     
     # US 10Y (bobot 25) - korelasi negatif
     if yield_chg is not None:
         if yield_chg > 0.5:
             bobot["bearish"] += 25
-            alasan.append(f"US 10Y naik {round(yield_chg, 2)}% → Bearish gold (+25)")
+            alasan.append(f"US 10Y naik {round(yield_chg, 2)}% -> Bearish gold (+25)")
         elif yield_chg < -0.5:
             bobot["bullish"] += 25
-            alasan.append(f"US 10Y turun {round(yield_chg, 2)}% → Bullish gold (+25)")
+            alasan.append(f"US 10Y turun {round(yield_chg, 2)}% -> Bullish gold (+25)")
         else:
             bobot["netral"] += 25
-            alasan.append(f"US 10Y flat {round(yield_chg, 2)}% → Netral (+25)")
+            alasan.append(f"US 10Y flat {round(yield_chg, 2)}% -> Netral (+25)")
     
     # Trend (bobot 30)
     if trend == "BULLISH":
@@ -165,12 +173,15 @@ def hitung_probabilitas(gold_chg, dxy_chg, yield_chg, trend):
         bobot["netral"] += 30
         alasan.append("Trend teknikal RANGING (+30 netral)")
     
-    total = bobot["bullish"] + bobot["bearish"]
-    if total == 0:
-        return 50, 50, alasan
+    prob_bull = round(bobot["bullish"])
+    prob_bear = round(bobot["bearish"])
+    prob_netral = round(bobot["netral"])
     
-    prob_bull = round((bobot["bullish"] / total) * 100)
-    prob_bear = 100 - prob_bull
+    # Kalau bull & bear dua-duanya 0, kasih 50/50
+    if prob_bull == 0 and prob_bear == 0:
+        prob_bull = 50
+        prob_bear = 50
+    
     return prob_bull, prob_bear, alasan
 
 # ============ MAIN ============
