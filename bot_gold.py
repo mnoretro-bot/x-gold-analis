@@ -7,7 +7,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # ============ AMBIL DATA VIA YAHOO FINANCE API ============
 def ambil_harga(symbol):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=15)
