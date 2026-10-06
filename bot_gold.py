@@ -22,9 +22,13 @@ def ambil_berita_gold():
             for entry in feed.entries[:3]:
                 judul = entry.title.lower()
                 # Sentiment sederhana
-                positif = ["rally", "surge", "gain", "rise", "bullish", "up", "high", "record"]
-                negatif = ["fall", "drop", "decline", "bearish", "down", "low", "crash", "plunge"]
-                
+                positif = ["rally", "surge", "gain", "rise", "bullish", "up", "high", "record", 
+                           "soar", "jump", "climb", "boost", "support", "strong", "upside",
+                           "recovery", "rebound", "optimism", "hope"]
+                negatif = ["fall", "drop", "decline", "bearish", "down", "low", "crash", "plunge",
+                           "slump", "tumble", "sink", "vulnerable", "weak", "pressure", "risk",
+                           "struggle", "dip", "worry", "fear", "sell-off"]               
+ 
                 skor = 0
                 for kata in positif:
                     if kata in judul:
