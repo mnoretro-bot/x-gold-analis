@@ -78,7 +78,16 @@ def ambil_kalender_ekonomi():
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:3]:
-                events.append(entry.title)
+                judul = entry.title
+                # Deteksi impact level
+                judul_lower = judul.lower()
+                if any(k in judul_lower for k in ["cpi", "nfp", "fomc", "gdp", "interest rate", "fed"]):
+                    impact = "🔴 High"
+                elif any(k in judul_lower for k in ["pmi", "retail", "unemployment", "ppi"]):
+                    impact = "🟡 Medium"
+                else:
+                    impact = "🟢 Low"
+                events.append(f"{impact} {judul[:70]}")
         except:
             pass
     return events[:5]
@@ -284,6 +293,50 @@ def hitung_korelasi(data1, data2):
         return None
     return round(num / (den1 * den2), 2)
 
+def bikin_chart_ob_fvg(data, nama_file, judul="Chart", bull_ob=None, bear_ob=None, bull_fvg=None, bear_fvg=None):
+    """Bikin chart dengan OB & FVG ditandai"""
+    if len(data) < 10:
+        return None
+    try:
+        data_50 = data[-50:]
+        closes = [d["close"] for d in data_50]
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(closes, label="Close", color="blue", linewidth=1.5)
+        
+        # Tandai Bullish OB
+        if bull_ob:
+            for ob in bull_ob[-2:]:  # Max 2 OB terakhir
+                ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="green", label="Bullish OB")
+        
+        # Tandai Bearish OB
+        if bear_ob:
+            for ob in bear_ob[-2:]:
+                ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="red", label="Bearish OB")
+        
+        # Tandai Bullish FVG
+        if bull_fvg:
+            for fvg in bull_fvg[-2:]:
+                ax.axhspan(fvg["bawah"], fvg["atas"], alpha=0.15, color="lime", label="Bullish FVG")
+        
+        # Tandai Bearish FVG
+        if bear_fvg:
+            for fvg in bear_fvg[-2:]:
+                ax.axhspan(fvg["bawah"], fvg["atas"], alpha=0.15, color="orange", label="Bearish FVG")
+        
+        ax.set_title(judul)
+        ax.set_ylabel("Harga")
+        ax.legend(loc="best", fontsize=7)
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(nama_file, dpi=70)
+        plt.close()
+        return nama_file
+    except Exception as e:
+        print(f"Error chart OB/FVG: {e}")
+        return None
+
 def bikin_chart(data, nama_file, judul="Chart"):
     if len(data) < 10:
         return None
@@ -411,7 +464,7 @@ for kode, h in hasil_pairs.items():
         sector_hasil[sector] = []
     sector_hasil[sector].append(h)
 
-# Ranking untuk Top 3
+# Ranking
 ranking = []
 for kode, h in hasil_pairs.items():
     kekuatan = max(h["prob_bull"], h["prob_bear"])
@@ -500,6 +553,13 @@ risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 pesan += f"🎯 {risk_sent}\n"
 pesan += f"📝 {risk_ket}\n\n"
 
+if kalender:
+    pesan += "---\n\n"
+    pesan += "📅 *KALENDER EKONOMI:*\n\n"
+    for e in kalender:
+        pesan += f"• {e}\n"
+    pesan += "\n"
+
 if berita_list:
     pesan += "---\n\n"
     pesan += "📰 *BERITA:*\n\n"
@@ -517,9 +577,19 @@ if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
 
-# Multi-Asset Chart (Top 3)
+# ============ CHART GOLD DENGAN OB & FVG ============
+print("Bikin chart Gold dengan OB/FVG...")
+data_h1_gold = ambil_ohlc("GC=F", "1h", "1mo")
+if data_h1_gold:
+    bull_ob, bear_ob = deteksi_ob(data_h1_gold)
+    bull_fvg, bear_fvg = deteksi_fvg(data_h1_gold)
+    chart_path = bikin_chart_ob_fvg(data_h1_gold, "chart_gold_ob.png", "Gold (XAUUSD) H1 + OB/FVG", bull_ob, bear_ob, bull_fvg, bear_fvg)
+    if chart_path:
+        kirim_foto_telegram(chart_path, caption="📈 Chart Gold H1 + OB/FVG")
+
+# Chart Top 3
 print("Bikin chart Top 3...")
-for i, r in enumerate(top3, 1):
+for i, r in enumerate(top3[:2], 1):  # Max 2 chart
     data_chart = ambil_ohlc(r["symbol"], "1d", "6mo")
     if data_chart:
         chart_file = f"chart_{r['kode'].lower()}.png"
