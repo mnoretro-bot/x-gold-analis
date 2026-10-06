@@ -264,6 +264,26 @@ def hitung_risk_sentiment(dxy_chg, yield_chg):
     else:
         return "NETRAL", "Sentimen campur"
 
+def hitung_korelasi(data1, data2):
+    if len(data1) < 10 or len(data2) < 10:
+        return None
+    n = min(len(data1), len(data2), 30)
+    closes1 = [d["close"] for d in data1[-n:]]
+    closes2 = [d["close"] for d in data2[-n:]]
+    chg1 = [closes1[i] - closes1[i-1] for i in range(1, len(closes1))]
+    chg2 = [closes2[i] - closes2[i-1] for i in range(1, len(closes2))]
+    n = len(chg1)
+    if n < 5:
+        return None
+    mean1 = sum(chg1) / n
+    mean2 = sum(chg2) / n
+    num = sum((chg1[i] - mean1) * (chg2[i] - mean2) for i in range(n))
+    den1 = sum((chg1[i] - mean1) ** 2 for i in range(n)) ** 0.5
+    den2 = sum((chg2[i] - mean2) ** 2 for i in range(n)) ** 0.5
+    if den1 == 0 or den2 == 0:
+        return None
+    return round(num / (den1 * den2), 2)
+
 def bikin_chart(data, nama_file, judul="Chart"):
     if len(data) < 10:
         return None
@@ -368,28 +388,21 @@ berita_list = ambil_berita_gold()
 print("Ambil kalender...")
 kalender = ambil_kalender_ekonomi()
 
-# Korelasi
-korelasi_gold_dxy = None
-korelasi_gold_oil = None
-korelasi_gold_btc = None
+# Korelasi Matrix
+print("Hitung korelasi...")
+korelasi_list = []
+kode_list = list(PAIRS.keys())
+for i in range(len(kode_list)):
+    for j in range(i+1, len(kode_list)):
+        k1 = kode_list[i]
+        k2 = kode_list[j]
+        if data_pairs.get(k1) and data_pairs.get(k2):
+            kor = hitung_korelasi(data_pairs[k1], data_pairs[k2])
+            if kor is not None:
+                korelasi_list.append((k1, k2, kor))
 
-if data_pairs.get("GOLD"):
-    dxy_data = ambil_ohlc("DX-Y.NYB", interval="1d", range_="6mo")
-    if dxy_data:
-        n = min(len(data_pairs["GOLD"]), len(dxy_data), 30)
-        if n >= 10:
-            c1 = [d["close"] for d in data_pairs["GOLD"][-n:]]
-            c2 = [d["close"] for d in dxy_data[-n:]]
-            chg1 = [c1[i] - c1[i-1] for i in range(1, len(c1))]
-            chg2 = [c2[i] - c2[i-1] for i in range(1, len(c2))]
-            if len(chg1) >= 5:
-                m1 = sum(chg1) / len(chg1)
-                m2 = sum(chg2) / len(chg2)
-                num = sum((chg1[i]-m1)*(chg2[i]-m2) for i in range(len(chg1)))
-                d1 = sum((chg1[i]-m1)**2 for i in range(len(chg1))) ** 0.5
-                d2 = sum((chg2[i]-m2)**2 for i in range(len(chg2))) ** 0.5
-                if d1 > 0 and d2 > 0:
-                    korelasi_gold_dxy = round(num / (d1 * d2), 2)
+# Sort by absolute value
+korelasi_list.sort(key=lambda x: abs(x[2]), reverse=True)
 
 # ============ ALERT ============
 alert_khusus = None
@@ -426,9 +439,21 @@ for kode, h in hasil_pairs.items():
     pesan += f"🎯 *Gabungan: {mtf['GABUNGAN']['bull']}%/{mtf['GABUNGAN']['bear']}%*\n\n"
 
 pesan += "---\n\n"
-pesan += "📊 *KORELASI GOLD:*\n\n"
-if korelasi_gold_dxy is not None:
-    pesan += f"• Gold vs DXY: {korelasi_gold_dxy}\n"
+pesan += "📊 *KORELASI MATRIX (Top 5):*\n\n"
+for k1, k2, kor in korelasi_list[:5]:
+    emoji1 = PAIRS[k1]["emoji"]
+    emoji2 = PAIRS[k2]["emoji"]
+    if kor > 0.7:
+        label = "🟢 Kuat+"
+    elif kor > 0.3:
+        label = "🟡 Sedang+"
+    elif kor < -0.7:
+        label = "🔴 Kuat-"
+    elif kor < -0.3:
+        label = "🟠 Sedang-"
+    else:
+        label = "⚪ Lemah"
+    pesan += f"• {emoji1} vs {emoji2}: {kor} {label}\n"
 
 pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
@@ -470,20 +495,21 @@ for i, bagian in enumerate(potongan):
     r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
     print(f"Bagian {i+1} terkirim!" if r.status_code == 200 else f"Bagian {i+1} gagal")
 
-# ============ TRADING JOURNAL ============
+# ============ TRADING JOURNAL (DENGAN TF) ============
 print("Bikin trading journal...")
 
 ranking = []
 for kode, h in hasil_pairs.items():
     kekuatan = max(h["prob_bull"], h["prob_bear"])
     bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
+    mtf = mtf_results[kode]
     ranking.append({
         "kode": kode,
         "nama": h["nama"],
         "emoji": h["emoji"],
         "bias": bias,
         "prob": kekuatan,
-        "harga": h["harga"]
+        "mtf": mtf
     })
 
 ranking.sort(key=lambda x: x["prob"], reverse=True)
@@ -494,7 +520,9 @@ journal += f"📅 {tanggal}\n\n"
 
 journal += "🎯 *SINYAL HARI INI:*\n"
 for r in ranking:
+    m = r["mtf"]
     journal += f"• {r['emoji']} {r['nama']}: *{r['bias']}* ({r['prob']}%)\n"
+    journal += f"  D1: {m['D1']['bull']}/{m['D1']['bear']} | H4: {m['H4']['bull']}/{m['H4']['bear']} | H1: {m['H1']['bull']}/{m['H1']['bear']} | M15: {m['M15']['bull']}/{m['M15']['bear']}\n"
 
 journal += "\n⭐ *TOP 3 SETUP:*\n"
 for i, r in enumerate(top3, 1):
@@ -517,6 +545,6 @@ journal += "\n⚠️ _Bukan jaminan profit. DYOR._"
 r_journal = requests.post(url_tg, data={
     "chat_id": CHAT_ID, "text": journal, "parse_mode": "Markdown"
 })
-print("Journal terkirim!" if r_journal.status_code == 200 else f"Journal gagal: {r_journal.json()}")
+print("Journal terkirim!" if r_journal.status_code == 200 else f"Journal gagal")
 
 print("Selesai!")
