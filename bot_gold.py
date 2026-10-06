@@ -79,7 +79,6 @@ def ambil_kalender_ekonomi():
             feed = feedparser.parse(url)
             for entry in feed.entries[:3]:
                 judul = entry.title
-                # Deteksi impact level
                 judul_lower = judul.lower()
                 if any(k in judul_lower for k in ["cpi", "nfp", "fomc", "gdp", "interest rate", "fed"]):
                     impact = "🔴 High"
@@ -294,7 +293,6 @@ def hitung_korelasi(data1, data2):
     return round(num / (den1 * den2), 2)
 
 def bikin_chart_ob_fvg(data, nama_file, judul="Chart", bull_ob=None, bear_ob=None, bull_fvg=None, bear_fvg=None):
-    """Bikin chart dengan OB & FVG ditandai"""
     if len(data) < 10:
         return None
     try:
@@ -304,22 +302,15 @@ def bikin_chart_ob_fvg(data, nama_file, judul="Chart", bull_ob=None, bear_ob=Non
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(closes, label="Close", color="blue", linewidth=1.5)
         
-        # Tandai Bullish OB
         if bull_ob:
-            for ob in bull_ob[-2:]:  # Max 2 OB terakhir
+            for ob in bull_ob[-2:]:
                 ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="green", label="Bullish OB")
-        
-        # Tandai Bearish OB
         if bear_ob:
             for ob in bear_ob[-2:]:
                 ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="red", label="Bearish OB")
-        
-        # Tandai Bullish FVG
         if bull_fvg:
             for fvg in bull_fvg[-2:]:
                 ax.axhspan(fvg["bawah"], fvg["atas"], alpha=0.15, color="lime", label="Bullish FVG")
-        
-        # Tandai Bearish FVG
         if bear_fvg:
             for fvg in bear_fvg[-2:]:
                 ax.axhspan(fvg["bawah"], fvg["atas"], alpha=0.15, color="orange", label="Bearish FVG")
@@ -328,7 +319,6 @@ def bikin_chart_ob_fvg(data, nama_file, judul="Chart", bull_ob=None, bear_ob=Non
         ax.set_ylabel("Harga")
         ax.legend(loc="best", fontsize=7)
         ax.grid(True, alpha=0.3)
-        
         plt.tight_layout()
         plt.savefig(nama_file, dpi=70)
         plt.close()
@@ -354,6 +344,48 @@ def bikin_chart(data, nama_file, judul="Chart"):
         return nama_file
     except Exception as e:
         print(f"Error chart: {e}")
+        return None
+
+def bikin_chart_multi_tf(symbol, nama_file, judul="Chart"):
+    """Bikin chart dengan 4 timeframe"""
+    data_d1 = ambil_ohlc(symbol, "1d", "6mo")
+    data_h1 = ambil_ohlc(symbol, "1h", "1mo")
+    data_m15 = ambil_ohlc(symbol, "15m", "7d")
+    
+    if not data_d1 or not data_h1 or not data_m15:
+        return None
+    
+    try:
+        fig, axes = plt.subplots(3, 1, figsize=(10, 10))
+        
+        # D1
+        closes_d1 = [d["close"] for d in data_d1[-50:]]
+        axes[0].plot(closes_d1, color="blue", linewidth=1.5)
+        axes[0].set_title(f"{judul} - D1 (Daily)")
+        axes[0].set_ylabel("Harga")
+        axes[0].grid(True, alpha=0.3)
+        
+        # H1
+        closes_h1 = [d["close"] for d in data_h1[-50:]]
+        axes[1].plot(closes_h1, color="green", linewidth=1.2)
+        axes[1].set_title("H1 (Hourly)")
+        axes[1].set_ylabel("Harga")
+        axes[1].grid(True, alpha=0.3)
+        
+        # M15
+        closes_m15 = [d["close"] for d in data_m15[-50:]]
+        axes[2].plot(closes_m15, color="red", linewidth=1)
+        axes[2].set_title("M15 (15 Min)")
+        axes[2].set_ylabel("Harga")
+        axes[2].set_xlabel("Candle")
+        axes[2].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(nama_file, dpi=70)
+        plt.close()
+        return nama_file
+    except Exception as e:
+        print(f"Error chart multi-TF: {e}")
         return None
 
 def kirim_foto_telegram(path_foto, caption=""):
@@ -577,6 +609,12 @@ if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
 
+# ============ CHART GOLD MULTI-TF ============
+print("Bikin chart Gold Multi-TF...")
+chart_mtf = bikin_chart_multi_tf("GC=F", "chart_gold_mtf.png", "Gold (XAUUSD)")
+if chart_mtf:
+    kirim_foto_telegram(chart_mtf, caption="📈 Chart Gold Multi-Timeframe (D1/H1/M15)")
+
 # ============ CHART GOLD DENGAN OB & FVG ============
 print("Bikin chart Gold dengan OB/FVG...")
 data_h1_gold = ambil_ohlc("GC=F", "1h", "1mo")
@@ -587,9 +625,9 @@ if data_h1_gold:
     if chart_path:
         kirim_foto_telegram(chart_path, caption="📈 Chart Gold H1 + OB/FVG")
 
-# Chart Top 3
+# Chart Top 3 (max 2)
 print("Bikin chart Top 3...")
-for i, r in enumerate(top3[:2], 1):  # Max 2 chart
+for i, r in enumerate(top3[:2], 1):
     data_chart = ambil_ohlc(r["symbol"], "1d", "6mo")
     if data_chart:
         chart_file = f"chart_{r['kode'].lower()}.png"
