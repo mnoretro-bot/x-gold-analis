@@ -528,6 +528,75 @@ def analisis_multi_tf_pair(symbol):
     hasil["GABUNGAN"] = {"bull": bull_gabung, "bear": bear_gabung}
     return hasil
 
+
+def analisis_profesor(hasil_pairs, mtf_results, korelasi_list, dxy, dxy_chg, yield10, yield_chg, risk_sent, berita_list):
+    if not GROQ_KEY:
+        return None
+    
+    data_teks = "=== DATA MARKET ===\n\n"
+    if dxy:
+        data_teks += f"DXY: {round(dxy, 2)} ({round(dxy_chg, 2)}%)\n"
+    if yield10:
+        data_teks += f"US 10Y: {round(yield10, 3)}% ({round(yield_chg, 3)}%)\n"
+    data_teks += f"Risk Sentiment: {risk_sent}\n\n"
+    
+    data_teks += "=== PAIRS ===\n\n"
+    for kode, h in hasil_pairs.items():
+        mtf = mtf_results[kode]
+        data_teks += f"{h['nama']}: {h['harga']} ({h['chg']}%)\n"
+        data_teks += f"D1: {mtf['D1']['bull']}/{mtf['D1']['bear']} | H4: {mtf['H4']['bull']}/{mtf['H4']['bear']} | H1: {mtf['H1']['bull']}/{mtf['H1']['bear']} | M15: {mtf['M15']['bull']}/{mtf['M15']['bear']}\n"
+        data_teks += f"Gabungan: {mtf['GABUNGAN']['bull']}/{mtf['GABUNGAN']['bear']}\n\n"
+    
+    data_teks += "=== KORELASI ===\n"
+    for k1, k2, kor in korelasi_list[:5]:
+        data_teks += f"{PAIRS[k1]['nama']} vs {PAIRS[k2]['nama']}: {kor}\n"
+    
+    prompt = f"""Kamu ANALIS TRADING PROFESOR dengan 20 tahun pengalaman, ahli SMC, ICT, fundamental, dan risk management.
+
+DATA:
+{data_teks}
+
+Buat analisis mendalam Bahasa Indonesia:
+
+🎓 ANALISIS PROFESOR
+
+1. KONDISI MAKRO: Analisis DXY, yield, risk sentiment. Dampak ke market?
+
+2. ANALISIS TEKNIKAL SMC: Untuk top 3 pair, analisis struktur market, OB, FVG, liquidity, confluence antar TF.
+
+3. KONFLUENSI & DIVERGENSI: Dimana sinyal searah? Dimana berlawanan?
+
+4. SCENARIO PLANNING:
+Bullish: trigger & target?
+Bearish: trigger & target?
+Netral: tunggu apa?
+
+5. RISK ASSESSMENT: Risiko utama, event ekonomi, level kritis.
+
+6. REKOMENDASI: Pair terbaik, setup entry/SL/TP, position sizing.
+
+7. KESIMPULAN: 1 paragraf bias + action plan.
+
+Maksimal 500 kata. Gunakan istilah teknis tepat. Analisis mendalam, bukan dangkal."""
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": "Bearer " + GROQ_KEY, "Content-Type": "application/json"}
+    data = {
+        "model": "openai/gpt-oss-120b",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 2000
+    }
+    
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=60)
+        hasil = r.json()
+        if "choices" in hasil:
+            return hasil["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"Error profesor: {e}")
+    return None
+
+
 # ============ MAIN ============
 print("Ambil data multi-pair...")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
@@ -668,6 +737,9 @@ for k1, k2, kor in korelasi_list[:5]:
 pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
 risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
+
+print("Analisis profesor...")
+analisis_deep = analisis_profesor(hasil_pairs, mtf_results, korelasi_list, dxy, dxy_chg, yield10, yield_chg, risk_sent, berita_list)
 pesan += f"🎯 {risk_sent}\n"
 pesan += f"📝 {risk_ket}\n\n"
 
