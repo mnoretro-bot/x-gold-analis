@@ -5,6 +5,7 @@ from datetime import datetime
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
+# ============ AMBIL HARGA ============
 def ambil_harga(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -20,6 +21,7 @@ def ambil_harga(symbol):
         print(f"Error: {e}")
     return None, None
 
+# ============ AMBIL OHLC ============
 def ambil_ohlc(symbol, interval="1h", range_="1mo"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -39,6 +41,20 @@ def ambil_ohlc(symbol, interval="1h", range_="1mo"):
     except:
         return []
 
+# ============ GABUNG CANDLE H1 -> H4 ============
+def gabung_h4(data_h1):
+    h4 = []
+    for i in range(0, len(data_h1) - 3, 4):
+        candle = data_h1[i:i+4]
+        h4.append({
+            "open": candle[0]["open"],
+            "high": max(c["high"] for c in candle),
+            "low": min(c["low"] for c in candle),
+            "close": candle[-1]["close"]
+        })
+    return h4
+
+# ============ SWING ============
 def deteksi_swing(data, kiri=2, kanan=2):
     sh, sl = [], []
     for i in range(kiri, len(data) - kanan):
@@ -52,27 +68,25 @@ def deteksi_swing(data, kiri=2, kanan=2):
             sl.append({"index": i, "harga": data[i]["low"]})
     return sh, sl
 
+# ============ TREND ============
 def analisis_trend(sh, sl):
     if len(sh) < 2 or len(sl) < 2:
-        return "RANGING", "Data kurang"
+        return "RANGING", "Data kurang", 0
     if sh[-1]["harga"] > sh[-2]["harga"]:
-        h = "HH"
         bh = "bullish"
     else:
-        h = "LH"
         bh = "bearish"
     if sl[-1]["harga"] > sl[-2]["harga"]:
-        l = "HL"
         bl = "bullish"
     else:
-        l = "LL"
         bl = "bearish"
     if bh == "bullish" and bl == "bullish":
-        return "BULLISH", f"{h} + {l}"
+        return "BULLISH", "HH + HL", 1
     elif bh == "bearish" and bl == "bearish":
-        return "BEARISH", f"{h} + {l}"
-    return "RANGING", f"{h} + {l}"
+        return "BEARISH", "LH + LL", -1
+    return "RANGING", "Mixed", 0
 
+# ============ BOS & MSS ============
 def deteksi_bos_mss(data, sh, sl, trend):
     if not sh or not sl:
         return None, None
@@ -90,6 +104,7 @@ def deteksi_bos_mss(data, sh, sl, trend):
             mss = f"MSS Bearish (${round(sl[-1]['harga'], 2)})"
     return bos, mss
 
+# ============ ORDER BLOCK ============
 def deteksi_ob(data):
     bull, bear = [], []
     for i in range(1, len(data) - 1):
@@ -105,6 +120,7 @@ def deteksi_ob(data):
                 bear.append({"atas": data[i]["high"], "bawah": data[i]["low"]})
     return bull, bear
 
+# ============ FVG ============
 def deteksi_fvg(data):
     bull, bear = [], []
     for i in range(1, len(data) - 1):
@@ -114,80 +130,73 @@ def deteksi_fvg(data):
             bear.append({"atas": data[i-1]["low"], "bawah": data[i+1]["high"]})
     return bull, bear
 
-def hitung_probabilitas(gold_chg, dxy_chg, yield_chg, trend):
+# ============ PROBABILITAS PER TIMEFRAME ============
+def probabilitas_tf(data, nama_tf):
+    sh, sl = deteksi_swing(data)
+    trend, ket, skor_trend = analisis_trend(sh, sl)
+    
     bobot = {"bullish": 0, "bearish": 0, "netral": 0}
-    alasan = []
-
-    if gold_chg is not None:
-        if gold_chg > 0.1:
-            bobot["bullish"] += 20
-            alasan.append(f"Gold naik {round(gold_chg, 2)}% -> Bullish (+20)")
-        elif gold_chg < -0.1:
-            bobot["bearish"] += 20
-            alasan.append(f"Gold turun {round(gold_chg, 2)}% -> Bearish (+20)")
-        else:
-            bobot["netral"] += 20
-            alasan.append(f"Gold flat {round(gold_chg, 2)}% -> Netral (+20)")
-
-    if dxy_chg is not None:
-        if dxy_chg > 0.1:
-            bobot["bearish"] += 25
-            alasan.append(f"DXY naik {round(dxy_chg, 2)}% -> Bearish gold (+25)")
-        elif dxy_chg < -0.1:
-            bobot["bullish"] += 25
-            alasan.append(f"DXY turun {round(dxy_chg, 2)}% -> Bullish gold (+25)")
-        else:
-            bobot["netral"] += 25
-            alasan.append(f"DXY flat {round(dxy_chg, 2)}% -> Netral (+25)")
-
-    if yield_chg is not None:
-        if yield_chg > 0.5:
-            bobot["bearish"] += 25
-            alasan.append(f"US 10Y naik {round(yield_chg, 2)}% -> Bearish gold (+25)")
-        elif yield_chg < -0.5:
-            bobot["bullish"] += 25
-            alasan.append(f"US 10Y turun {round(yield_chg, 2)}% -> Bullish gold (+25)")
-        else:
-            bobot["netral"] += 25
-            alasan.append(f"US 10Y flat {round(yield_chg, 2)}% -> Netral (+25)")
-
+    
+    # Trend (bobot 100)
     if trend == "BULLISH":
-        bobot["bullish"] += 30
-        alasan.append("Trend teknikal BULLISH (+30)")
+        bobot["bullish"] += 100
     elif trend == "BEARISH":
-        bobot["bearish"] += 30
-        alasan.append("Trend teknikal BEARISH (+30)")
+        bobot["bearish"] += 100
     else:
-        bobot["netral"] += 30
-        alasan.append("Trend teknikal RANGING (+30 netral)")
-
+        bobot["netral"] += 100
+    
+    # Cek BOS/MSS di timeframe ini
+    bos, mss = deteksi_bos_mss(data, sh, sl, trend)
+    if bos:
+        if "Bullish" in bos:
+            bobot["bullish"] += 50
+        else:
+            bobot["bearish"] += 50
+    if mss:
+        if "Bullish" in mss:
+            bobot["bullish"] += 50
+        else:
+            bobot["bearish"] += 50
+    
     netral_setengah = bobot["netral"] / 2
     skor_bull = bobot["bullish"] + netral_setengah
     skor_bear = bobot["bearish"] + netral_setengah
-    total_skor = skor_bull + skor_bear
+    total = skor_bull + skor_bear
+    
+    if total == 0:
+        return 50, 50, trend, ket, bos, mss
+    prob_bull = round((skor_bull / total) * 100)
+    prob_bear = 100 - prob_bull
+    return prob_bull, prob_bear, trend, ket, bos, mss
 
-    if total_skor == 0:
-        prob_bull = 50
-        prob_bear = 50
-    else:
-        prob_bull = round((skor_bull / total_skor) * 100)
-        prob_bear = 100 - prob_bull
-
-    return prob_bull, prob_bear, alasan
-
+# ============ MAIN ============
 print("Ambil data...")
 gold, gold_chg = ambil_harga("GC=F")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
 yield10, yield_chg = ambil_harga("^TNX")
-ohlc_gold = ambil_ohlc("GC=F", interval="1h", range_="1mo")
 
-sh, sl = deteksi_swing(ohlc_gold)
-trend, ket = analisis_trend(sh, sl)
-bos, mss = deteksi_bos_mss(ohlc_gold, sh, sl, trend)
-bull_ob, bear_ob = deteksi_ob(ohlc_gold)
-bull_fvg, bear_fvg = deteksi_fvg(ohlc_gold)
-prob_bull, prob_bear, alasan_prob = hitung_probabilitas(gold_chg, dxy_chg, yield_chg, trend)
+print("Ambil data H1...")
+data_h1 = ambil_ohlc("GC=F", interval="1h", range_="1mo")
+print(f"H1 candles: {len(data_h1)}")
 
+print("Gabung H1 jadi H4...")
+data_h4 = gabung_h4(data_h1)
+print(f"H4 candles: {len(data_h4)}")
+
+print("Ambil data M15...")
+data_m15 = ambil_ohlc("GC=F", interval="15m", range_="7d")
+print(f"M15 candles: {len(data_m15)}")
+
+# Hitung probabilitas per timeframe
+prob_h4_bull, prob_h4_bear, trend_h4, ket_h4, bos_h4, mss_h4 = probabilitas_tf(data_h4, "H4")
+prob_h1_bull, prob_h1_bear, trend_h1, ket_h1, bos_h1, mss_h1 = probabilitas_tf(data_h1, "H1")
+prob_m15_bull, prob_m15_bear, trend_m15, ket_m15, bos_m15, mss_m15 = probabilitas_tf(data_m15, "M15")
+
+# Probabilitas gabungan (bobot: H4 40%, H1 35%, M15 25%)
+prob_bull_total = round(prob_h4_bull * 0.4 + prob_h1_bull * 0.35 + prob_m15_bull * 0.25)
+prob_bear_total = 100 - prob_bull_total
+
+# ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
 pesan = "📊 *DATA MARKET GOLD*\n"
 pesan += f"📅 {tanggal}\n\n"
@@ -200,41 +209,41 @@ if yield10:
     pesan += f"📈 *US 10Y*: {round(yield10, 3)}% ({round(yield_chg, 3)}%)\n"
 
 pesan += "\n---\n\n"
-pesan += "🎯 *PROBABILITAS GOLD*\n\n"
-pesan += f"📈 Bullish: *{prob_bull}%*\n"
-pesan += f"📉 Bearish: *{prob_bear}%*\n\n"
-pesan += "📊 *ALASAN:*\n"
-for a in alasan_prob:
-    pesan += f"• {a}\n"
+pesan += "🎯 *PROBABILITAS MULTI-TIMEFRAME*\n\n"
 
-pesan += "\n---\n\n"
-pesan += "📈 *ANALISIS TEKNIKAL (H1)*\n\n"
-pesan += f"🎯 *TREND: {trend}*\n\n"
+pesan += f"🗓️ *H4 (Mingguan):*\n"
+pesan += f"  📈 Bullish: {prob_h4_bull}%\n"
+pesan += f"  📉 Bearish: {prob_h4_bear}%\n"
+pesan += f"  Trend: {trend_h4}\n\n"
 
-if len(sh) >= 2 and len(sl) >= 2:
-    pesan += f"📊 Swing High: ${round(sh[-1]['harga'], 2)}\n"
-    pesan += f"📊 Swing Low: ${round(sl[-1]['harga'], 2)}\n\n"
-    pesan += f"📈 Struktur: {ket}\n\n"
+pesan += f"📅 *H1 (Harian):*\n"
+pesan += f"  📈 Bullish: {prob_h1_bull}%\n"
+pesan += f"  📉 Bearish: {prob_h1_bear}%\n"
+pesan += f"  Trend: {trend_h1}\n\n"
 
-if bos:
-    pesan += f"🔔 *{bos}*\n\n"
-if mss:
-    pesan += f"🚨 *{mss}*\n\n"
+pesan += f"⏰ *M15 (Jangka Pendek):*\n"
+pesan += f"  📈 Bullish: {prob_m15_bull}%\n"
+pesan += f"  📉 Bearish: {prob_m15_bear}%\n"
+pesan += f"  Trend: {trend_m15}\n\n"
 
-if bull_ob:
-    ob = bull_ob[-1]
-    pesan += f"📦 Bullish OB: ${round(ob['bawah'], 2)} - ${round(ob['atas'], 2)}\n"
-if bear_ob:
-    ob = bear_ob[-1]
-    pesan += f"📦 Bearish OB: ${round(ob['bawah'], 2)} - ${round(ob['atas'], 2)}\n"
+pesan += "---\n\n"
+pesan += "💡 *KESIMPULAN GABUNGAN:*\n\n"
+pesan += f"📈 Bullish: *{prob_bull_total}%*\n"
+pesan += f"📉 Bearish: *{prob_bear_total}%*\n\n"
 
-if bull_fvg:
-    fvg = bull_fvg[-1]
-    pesan += f"📊 Bullish FVG: ${round(fvg['bawah'], 2)} - ${round(fvg['atas'], 2)}\n"
-if bear_fvg:
-    fvg = bear_fvg[-1]
-    pesan += f"📊 Bearish FVG: ${round(fvg['bawah'], 2)} - ${round(fvg['atas'], 2)}\n"
+# Interpretasi
+if prob_bull_total >= 65:
+    pesan += "🎯 Bias: *STRONG BULLISH*\n"
+elif prob_bull_total >= 55:
+    pesan += "🎯 Bias: *BULLISH*\n"
+elif prob_bear_total >= 65:
+    pesan += "🎯 Bias: *STRONG BEARISH*\n"
+elif prob_bear_total >= 55:
+    pesan += "🎯 Bias: *BEARISH*\n"
+else:
+    pesan += "🎯 Bias: *NETRAL / RANGING*\n"
 
+# ============ KIRIM ============
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"})
 print("Terkirim!" if r.status_code == 200 else f"Gagal: {r.json()}")
