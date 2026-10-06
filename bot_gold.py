@@ -291,6 +291,26 @@ def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob)
     return {"bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
             "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)}
 
+def hitung_korelasi(data1, data2):
+    if len(data1) < 10 or len(data2) < 10:
+        return None
+    n = min(len(data1), len(data2), 30)
+    closes1 = [d["close"] for d in data1[-n:]]
+    closes2 = [d["close"] for d in data2[-n:]]
+    chg1 = [closes1[i] - closes1[i-1] for i in range(1, len(closes1))]
+    chg2 = [closes2[i] - closes2[i-1] for i in range(1, len(closes2))]
+    n = len(chg1)
+    if n < 5:
+        return None
+    mean1 = sum(chg1) / n
+    mean2 = sum(chg2) / n
+    num = sum((chg1[i] - mean1) * (chg2[i] - mean2) for i in range(n))
+    den1 = sum((chg1[i] - mean1) ** 2 for i in range(n)) ** 0.5
+    den2 = sum((chg2[i] - mean2) ** 2 for i in range(n)) ** 0.5
+    if den1 == 0 or den2 == 0:
+        return None
+    return round(num / (den1 * den2), 2)
+
 def bikin_chart(data, nama_file, judul="Chart"):
     if len(data) < 10:
         return None
@@ -322,7 +342,6 @@ def kirim_foto_telegram(path_foto, caption=""):
         return False
 
 def analisis_multi_tf_pair(symbol):
-    """Analisis multi-timeframe untuk 1 pair"""
     data_h1 = ambil_ohlc(symbol, "1h", "1mo")
     data_h4 = gabung_h4(data_h1)
     data_d1 = ambil_ohlc(symbol, "1d", "6mo")
@@ -354,7 +373,6 @@ def analisis_multi_tf_pair(symbol):
     else:
         hasil["M15"] = {"bull": 50, "bear": 50, "trend": "N/A"}
     
-    # Gabungan (bobot: D1 30%, H4 30%, H1 25%, M15 15%)
     bull_gabung = round(
         hasil["D1"]["bull"] * 0.30 +
         hasil["H4"]["bull"] * 0.30 +
@@ -380,7 +398,6 @@ for kode, info in PAIRS.items():
     harga, chg = ambil_harga(info["symbol"])
     data_d1 = ambil_ohlc(info["symbol"], interval="1d", range_="6mo")
     
-    # Multi-TF analysis
     mtf = analisis_multi_tf_pair(info["symbol"])
     mtf_results[kode] = mtf
     
@@ -400,25 +417,17 @@ kalender = ambil_kalender_ekonomi()
 
 # Korelasi
 korelasi_gold_dxy = None
+korelasi_gold_oil = None
+korelasi_gold_btc = None
+
 if data_pairs.get("GOLD"):
     dxy_data = ambil_ohlc("DX-Y.NYB", interval="1d", range_="6mo")
     if dxy_data:
-        from statistics import correlation if False else None
-        # Korelasi sederhana
-        n = min(len(data_pairs["GOLD"]), len(dxy_data), 30)
-        if n >= 10:
-            c1 = [d["close"] for d in data_pairs["GOLD"][-n:]]
-            c2 = [d["close"] for d in dxy_data[-n:]]
-            chg1 = [c1[i] - c1[i-1] for i in range(1, len(c1))]
-            chg2 = [c2[i] - c2[i-1] for i in range(1, len(c2))]
-            if len(chg1) >= 5:
-                m1 = sum(chg1) / len(chg1)
-                m2 = sum(chg2) / len(chg2)
-                num = sum((chg1[i]-m1)*(chg2[i]-m2) for i in range(len(chg1)))
-                d1 = sum((chg1[i]-m1)**2 for i in range(len(chg1))) ** 0.5
-                d2 = sum((chg2[i]-m2)**2 for i in range(len(chg2))) ** 0.5
-                if d1 > 0 and d2 > 0:
-                    korelasi_gold_dxy = round(num / (d1 * d2), 2)
+        korelasi_gold_dxy = hitung_korelasi(data_pairs["GOLD"], dxy_data)
+if data_pairs.get("GOLD") and data_pairs.get("OIL"):
+    korelasi_gold_oil = hitung_korelasi(data_pairs["GOLD"], data_pairs["OIL"])
+if data_pairs.get("GOLD") and data_pairs.get("BTC"):
+    korelasi_gold_btc = hitung_korelasi(data_pairs["GOLD"], data_pairs["BTC"])
 
 # ============ ALERT ============
 alert_khusus = None
@@ -454,12 +463,16 @@ for kode, h in hasil_pairs.items():
     pesan += f"⏰ M15: {mtf['M15']['bull']}/{mtf['M15']['bear']} ({mtf['M15']['trend']})\n"
     pesan += f"🎯 *Gabungan: {mtf['GABUNGAN']['bull']}%/{mtf['GABUNGAN']['bear']}%*\n\n"
 
-if korelasi_gold_dxy is not None:
-    pesan += "---\n\n"
-    pesan += "📊 *KORELASI GOLD vs DXY:*\n"
-    pesan += f"• {korelasi_gold_dxy}\n\n"
-
 pesan += "---\n\n"
+pesan += "📊 *KORELASI GOLD:*\n\n"
+if korelasi_gold_dxy is not None:
+    pesan += f"• Gold vs DXY: {korelasi_gold_dxy}\n"
+if korelasi_gold_oil is not None:
+    pesan += f"• Gold vs Oil: {korelasi_gold_oil}\n"
+if korelasi_gold_btc is not None:
+    pesan += f"• Gold vs BTC: {korelasi_gold_btc}\n"
+
+pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
 risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 pesan += f"🎯 {risk_sent}\n"
@@ -485,7 +498,6 @@ if data_pairs.get("GOLD"):
 
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 
-# Pecah pesan kalau kepanjangan
 max_len = 4000
 potongan = []
 while len(pesan) > max_len:
