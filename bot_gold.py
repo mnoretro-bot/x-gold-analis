@@ -412,6 +412,7 @@ if data_pairs.get("GOLD") and data_pairs.get("BTC"):
 
 # ============ CEK ALERT ============
 alert_khusus = None
+alert_rr = None
 
 # Alert probabilitas > 80%
 for kode, h in hasil_pairs.items():
@@ -429,6 +430,14 @@ if not alert_khusus and hasil_pairs.get("GOLD"):
         alert_khusus = f"🔔 *ALERT BOS GOLD:*\n{g['bos']}"
     elif g.get("mss"):
         alert_khusus = f"🚨 *ALERT MSS GOLD:*\n{g['mss']}"
+
+# Alert RR > 1:3 untuk Gold
+if hasil_pairs.get("GOLD") and hasil_pairs["GOLD"]["harga"]:
+    g = hasil_pairs["GOLD"]
+    bull_ob_h4, bear_ob_h4 = deteksi_ob(gabung_h4(ambil_ohlc("GC=F", "1h", "1mo")))
+    saran = hitung_saran_trading(g["prob_bull"], g["prob_bear"], g["harga"], bull_ob_h4, bear_ob_h4)
+    if saran and saran["rr"] >= 3:
+        alert_rr = f"🔥🔥 *SETUP BAGUS!* 🔥🔥\n\n🥇 GOLD: *{saran['bias']}*\n📍 Entry: ${saran['entry']}\n🛑 SL: ${saran['sl']}\n🎯 TP1: ${saran['tp1']}\n📊 RR: 1:{saran['rr']}\n🎯 Probabilitas: {g['prob_bear'] if saran['bias']=='SELL' else g['prob_bull']}%"
 
 # ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
@@ -485,15 +494,20 @@ if berita_list:
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
 # ============ KIRIM ============
-# Kirim alert terpisah kalau ada
+# Kirim alert terpisah
 if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     r_alert = requests.post(url_alert, data={
-        "chat_id": CHAT_ID,
-        "text": alert_khusus,
-        "parse_mode": "Markdown"
+        "chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"
     })
     print("Alert terkirim!" if r_alert.status_code == 200 else f"Alert gagal")
+
+if alert_rr:
+    url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
+    r_alert = requests.post(url_alert, data={
+        "chat_id": CHAT_ID, "text": alert_rr, "parse_mode": "Markdown"
+    })
+    print("Alert RR terkirim!" if r_alert.status_code == 200 else f"Alert RR gagal")
 
 # Kirim chart
 if data_pairs.get("GOLD"):
