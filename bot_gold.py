@@ -405,7 +405,6 @@ for i in range(len(kode_list)):
 korelasi_list.sort(key=lambda x: abs(x[2]), reverse=True)
 
 # ============ SECTOR ANALYSIS ============
-print("Analisis sector...")
 sector_hasil = {}
 for kode, h in hasil_pairs.items():
     sector = h["sector"]
@@ -413,7 +412,17 @@ for kode, h in hasil_pairs.items():
         sector_hasil[sector] = []
     sector_hasil[sector].append(h)
 
-# ============ ALERT MULTI-LEVEL ============
+# ============ ALERT KORELASI ============
+alert_korelasi = None
+for k1, k2, kor in korelasi_list:
+    if kor >= 0.9:
+        alert_korelasi = f"⚡ *ALERT KORELASI TINGGI!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}* (sangat kuat!)\n\nArtinya: 2 aset ini bergerak hampir sama."
+        break
+    elif kor <= -0.9:
+        alert_korelasi = f"⚡ *ALERT KORELASI NEGATIF TINGGI!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}* (sangat negatif!)\n\nArtinya: 2 aset ini bergerak berlawanan."
+        break
+
+# ============ ALERT SINYAL ============
 alert_khusus = None
 for kode, h in hasil_pairs.items():
     if h["prob_bull"] >= 80:
@@ -447,7 +456,6 @@ for kode, h in hasil_pairs.items():
     pesan += f"⏰ M15: {mtf['M15']['bull']}/{mtf['M15']['bear']} ({mtf['M15']['trend']})\n"
     pesan += f"🎯 *Gabungan: {mtf['GABUNGAN']['bull']}%/{mtf['GABUNGAN']['bear']}%*\n\n"
 
-# Sector Analysis
 pesan += "---\n\n"
 pesan += "🏭 *SECTOR ANALYSIS:*\n\n"
 for sector, pairs in sector_hasil.items():
@@ -458,7 +466,6 @@ for sector, pairs in sector_hasil.items():
         pesan += f"  {h['emoji']} {h['nama']}: {bias} ({kekuatan}%)\n"
     pesan += "\n"
 
-# Korelasi Matrix
 pesan += "---\n\n"
 pesan += "📊 *KORELASI MATRIX (Top 5):*\n\n"
 for k1, k2, kor in korelasi_list[:5]:
@@ -490,7 +497,11 @@ if berita_list:
 
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
-# ============ KIRIM PESAN UTAMA ============
+# ============ KIRIM ============
+if alert_korelasi:
+    url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
+    requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_korelasi, "parse_mode": "Markdown"})
+
 if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
@@ -526,7 +537,7 @@ for kode, h in hasil_pairs.items():
     mtf = mtf_results[kode]
     ranking.append({
         "kode": kode, "nama": h["nama"], "emoji": h["emoji"],
-        "bias": bias, "prob": kekuatan, "mtf": mtf, "sector": h["sector"]
+        "bias": bias, "prob": kekuatan, "mtf": mtf
     })
 
 ranking.sort(key=lambda x: x["prob"], reverse=True)
