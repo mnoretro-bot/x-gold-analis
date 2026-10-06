@@ -857,4 +857,19 @@ r_journal = requests.post(url_tg, data={
 })
 print("Journal terkirim!" if r_journal.status_code == 200 else f"Journal gagal")
 
+# Kirim analisis profesor
+if analisis_deep:
+    pesan_prof = "🎓 *ANALISIS PROFESOR*\n\n" + analisis_deep + "\n\n⚠️ _Bukan jaminan profit. DYOR._"
+    max_len_p = 4000
+    pot_p = []
+    while len(pesan_prof) > max_len_p:
+        idx = pesan_prof.rfind("\n", 0, max_len_p)
+        if idx == -1:
+            idx = max_len_p
+        pot_p.append(pesan_prof[:idx])
+        pesan_prof = pesan_prof[idx:].lstrip()
+    pot_p.append(pesan_prof)
+    for i, bagian in enumerate(pot_p):
+        r_p = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
+        print(f"Profesor bagian {i+1} terkirim!" if r_p.status_code == 200 else f"Gagal")
 print("Selesai!")
