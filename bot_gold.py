@@ -291,48 +291,6 @@ def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob)
     return {"bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
             "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)}
 
-def backtest(data, prob_bull, prob_bear):
-    if len(data) < 30:
-        return None
-    menang = 0
-    total = 0
-    if prob_bull >= 60:
-        bias = "BULLISH"
-    elif prob_bear >= 60:
-        bias = "BEARISH"
-    else:
-        return None
-    for i in range(1, min(30, len(data))):
-        perubahan = data[-i]["close"] - data[-i-1]["close"]
-        if bias == "BULLISH" and perubahan > 0:
-            menang += 1
-        elif bias == "BEARISH" and perubahan < 0:
-            menang += 1
-        total += 1
-    if total == 0:
-        return None
-    return round((menang / total) * 100)
-
-def hitung_korelasi(data1, data2):
-    if len(data1) < 10 or len(data2) < 10:
-        return None
-    n = min(len(data1), len(data2), 30)
-    closes1 = [d["close"] for d in data1[-n:]]
-    closes2 = [d["close"] for d in data2[-n:]]
-    chg1 = [closes1[i] - closes1[i-1] for i in range(1, len(closes1))]
-    chg2 = [closes2[i] - closes2[i-1] for i in range(1, len(closes2))]
-    n = len(chg1)
-    if n < 5:
-        return None
-    mean1 = sum(chg1) / n
-    mean2 = sum(chg2) / n
-    num = sum((chg1[i] - mean1) * (chg2[i] - mean2) for i in range(n))
-    den1 = sum((chg1[i] - mean1) ** 2 for i in range(n)) ** 0.5
-    den2 = sum((chg2[i] - mean2) ** 2 for i in range(n)) ** 0.5
-    if den1 == 0 or den2 == 0:
-        return None
-    return round(num / (den1 * den2), 2)
-
 def bikin_chart(data, nama_file, judul="Chart"):
     if len(data) < 10:
         return None
@@ -363,57 +321,50 @@ def kirim_foto_telegram(path_foto, caption=""):
     except:
         return False
 
-def buat_weekly_report(hasil_pairs, dxy, dxy_chg, yield10, yield_chg):
-    """Bikin laporan mingguan"""
-    if not GROQ_KEY:
-        return None
+def analisis_multi_tf_pair(symbol):
+    """Analisis multi-timeframe untuk 1 pair"""
+    data_h1 = ambil_ohlc(symbol, "1h", "1mo")
+    data_h4 = gabung_h4(data_h1)
+    data_d1 = ambil_ohlc(symbol, "1d", "6mo")
+    data_m15 = ambil_ohlc(symbol, "15m", "7d")
     
-    # Ranking aset
-    ranking_bull = sorted(hasil_pairs.items(), key=lambda x: x[1]["prob_bull"], reverse=True)
-    ranking_bear = sorted(hasil_pairs.items(), key=lambda x: x[1]["prob_bear"], reverse=True)
+    hasil = {}
     
-    # Top 3 bullish & bearish
-    top_bull = ranking_bull[:3]
-    top_bear = ranking_bear[:3]
+    if data_d1:
+        pb, pbe, tr, _, _, _ = probabilitas_tf(data_d1, "D1")
+        hasil["D1"] = {"bull": pb, "bear": pbe, "trend": tr}
+    else:
+        hasil["D1"] = {"bull": 50, "bear": 50, "trend": "N/A"}
     
-    # Prompt AI
-    prompt = f"""Kamu analis trading profesional. Buat laporan mingguan singkat (maks 200 kata) berdasarkan data ini:
-
-DXY: {round(dxy, 2) if dxy else 'N/A'} ({round(dxy_chg, 2) if dxy_chg else 'N/A'}%)
-US 10Y: {round(yield10, 3) if yield10 else 'N/A'}% ({round(yield_chg, 3) if yield_chg else 'N/A'}%)
-
-Top 3 Bullish:
-"""
-    for kode, h in top_bull:
-        prompt += f"- {h['nama']}: {h['prob_bull']}% bullish\n"
+    if data_h4:
+        pb, pbe, tr, _, _, _ = probabilitas_tf(data_h4, "H4")
+        hasil["H4"] = {"bull": pb, "bear": pbe, "trend": tr}
+    else:
+        hasil["H4"] = {"bull": 50, "bear": 50, "trend": "N/A"}
     
-    prompt += "\nTop 3 Bearish:\n"
-    for kode, h in top_bear:
-        prompt += f"- {h['nama']}: {h['prob_bear']}% bearish\n"
+    if data_h1:
+        pb, pbe, tr, _, _, _ = probabilitas_tf(data_h1, "H1")
+        hasil["H1"] = {"bull": pb, "bear": pbe, "trend": tr}
+    else:
+        hasil["H1"] = {"bull": 50, "bear": 50, "trend": "N/A"}
     
-    prompt += """
-Buat laporan:
-1. Ringkasan mingguan (2 baris)
-2. Aset paling menarik minggu ini
-3. Prediksi minggu depan
-4. Rekomendasi fokus
-
-Bahasa Indonesia, singkat, to the point."""
+    if data_m15:
+        pb, pbe, tr, _, _, _ = probabilitas_tf(data_m15, "M15")
+        hasil["M15"] = {"bull": pb, "bear": pbe, "trend": tr}
+    else:
+        hasil["M15"] = {"bull": 50, "bear": 50, "trend": "N/A"}
     
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": "Bearer " + GROQ_KEY, "Content-Type": "application/json"}
-    data = {
-        "model": "openai/gpt-oss-20b",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    try:
-        r = requests.post(url, headers=headers, json=data, timeout=30)
-        hasil = r.json()
-        if "choices" in hasil:
-            return hasil["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"Error weekly report: {e}")
-    return None
+    # Gabungan (bobot: D1 30%, H4 30%, H1 25%, M15 15%)
+    bull_gabung = round(
+        hasil["D1"]["bull"] * 0.30 +
+        hasil["H4"]["bull"] * 0.30 +
+        hasil["H1"]["bull"] * 0.25 +
+        hasil["M15"]["bull"] * 0.15
+    )
+    bear_gabung = 100 - bull_gabung
+    
+    hasil["GABUNGAN"] = {"bull": bull_gabung, "bear": bear_gabung}
+    return hasil
 
 # ============ MAIN ============
 print("Ambil data multi-pair...")
@@ -422,24 +373,23 @@ yield10, yield_chg = ambil_harga("^TNX")
 
 hasil_pairs = {}
 data_pairs = {}
+mtf_results = {}
 
 for kode, info in PAIRS.items():
     print(f"Analisis {kode}...")
     harga, chg = ambil_harga(info["symbol"])
-    data_h1 = ambil_ohlc(info["symbol"], interval="1h", range_="1mo")
-    data_h4 = gabung_h4(data_h1)
     data_d1 = ambil_ohlc(info["symbol"], interval="1d", range_="6mo")
     
-    if data_h4:
-        prob_bull, prob_bear, trend, _, bos, mss = probabilitas_tf(data_h4, "H4")
-    else:
-        prob_bull, prob_bear, trend, bos, mss = 50, 50, "RANGING", None, None
+    # Multi-TF analysis
+    mtf = analisis_multi_tf_pair(info["symbol"])
+    mtf_results[kode] = mtf
     
     hasil_pairs[kode] = {
         "harga": harga, "chg": chg,
-        "prob_bull": prob_bull, "prob_bear": prob_bear,
-        "trend": trend, "emoji": info["emoji"], "nama": info["nama"],
-        "bos": bos, "mss": mss
+        "prob_bull": mtf["GABUNGAN"]["bull"],
+        "prob_bear": mtf["GABUNGAN"]["bear"],
+        "trend": mtf["H4"]["trend"],
+        "emoji": info["emoji"], "nama": info["nama"]
     }
     data_pairs[kode] = data_d1
 
@@ -453,12 +403,25 @@ korelasi_gold_dxy = None
 if data_pairs.get("GOLD"):
     dxy_data = ambil_ohlc("DX-Y.NYB", interval="1d", range_="6mo")
     if dxy_data:
-        korelasi_gold_dxy = hitung_korelasi(data_pairs["GOLD"], dxy_data)
+        from statistics import correlation if False else None
+        # Korelasi sederhana
+        n = min(len(data_pairs["GOLD"]), len(dxy_data), 30)
+        if n >= 10:
+            c1 = [d["close"] for d in data_pairs["GOLD"][-n:]]
+            c2 = [d["close"] for d in dxy_data[-n:]]
+            chg1 = [c1[i] - c1[i-1] for i in range(1, len(c1))]
+            chg2 = [c2[i] - c2[i-1] for i in range(1, len(c2))]
+            if len(chg1) >= 5:
+                m1 = sum(chg1) / len(chg1)
+                m2 = sum(chg2) / len(chg2)
+                num = sum((chg1[i]-m1)*(chg2[i]-m2) for i in range(len(chg1)))
+                d1 = sum((chg1[i]-m1)**2 for i in range(len(chg1))) ** 0.5
+                d2 = sum((chg2[i]-m2)**2 for i in range(len(chg2))) ** 0.5
+                if d1 > 0 and d2 > 0:
+                    korelasi_gold_dxy = round(num / (d1 * d2), 2)
 
-# ============ CEK ALERT ============
+# ============ ALERT ============
 alert_khusus = None
-alert_rr = None
-
 for kode, h in hasil_pairs.items():
     if h["prob_bull"] >= 80:
         alert_khusus = f"🚨🚨🚨 *ALERT SINYAL KUAT* 🚨🚨🚨\n\n{h['emoji']} {h['nama']}: *STRONG BULLISH {h['prob_bull']}%!*"
@@ -467,13 +430,9 @@ for kode, h in hasil_pairs.items():
         alert_khusus = f"🚨🚨🚨 *ALERT SINYAL KUAT* 🚨🚨🚨\n\n{h['emoji']} {h['nama']}: *STRONG BEARISH {h['prob_bear']}%!*"
         break
 
-# ============ CEK HARI MINGGU ============
-hari_ini = datetime.now().strftime("%A")
-is_minggu = hari_ini == "Sunday"
-
-# ============ SUSUN PESAN UTAMA ============
+# ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
-pesan = "📊 *MULTI-PAIR ANALYSIS*\n"
+pesan = "📊 *MULTI-PAIR + MULTI-TIMEFRAME*\n"
 pesan += f"📅 {tanggal}\n\n"
 
 if dxy:
@@ -482,36 +441,29 @@ if yield10:
     pesan += f"📈 *US 10Y*: {round(yield10, 3)}% ({round(yield_chg, 3)}%)\n"
 
 pesan += "\n---\n\n"
-pesan += "🎯 *ANALISIS PAIRS*\n\n"
+pesan += "🎯 *ANALISIS MULTI-TIMEFRAME*\n\n"
 
 for kode, h in hasil_pairs.items():
+    mtf = mtf_results[kode]
     pesan += f"{h['emoji']} *{h['nama']}*\n"
     if h["harga"]:
         pesan += f"💰 {round(h['harga'], 2)} ({round(h['chg'], 2)}%)\n"
-    pesan += f"🎯 {h['trend']} ({h['prob_bull']}%/{h['prob_bear']}%)\n"
-    if h.get("bos"):
-        pesan += f"🔔 {h['bos']}\n"
-    if h.get("mss"):
-        pesan += f"🚨 {h['mss']}\n"
-    pesan += "\n"
+    pesan += f"📆 D1: {mtf['D1']['bull']}/{mtf['D1']['bear']} ({mtf['D1']['trend']})\n"
+    pesan += f"🗓️ H4: {mtf['H4']['bull']}/{mtf['H4']['bear']} ({mtf['H4']['trend']})\n"
+    pesan += f"📅 H1: {mtf['H1']['bull']}/{mtf['H1']['bear']} ({mtf['H1']['trend']})\n"
+    pesan += f"⏰ M15: {mtf['M15']['bull']}/{mtf['M15']['bear']} ({mtf['M15']['trend']})\n"
+    pesan += f"🎯 *Gabungan: {mtf['GABUNGAN']['bull']}%/{mtf['GABUNGAN']['bear']}%*\n\n"
+
+if korelasi_gold_dxy is not None:
+    pesan += "---\n\n"
+    pesan += "📊 *KORELASI GOLD vs DXY:*\n"
+    pesan += f"• {korelasi_gold_dxy}\n\n"
 
 pesan += "---\n\n"
-pesan += "📊 *KORELASI GOLD:*\n\n"
-if korelasi_gold_dxy is not None:
-    pesan += f"• Gold vs DXY: {korelasi_gold_dxy}\n"
-
-pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
 risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 pesan += f"🎯 {risk_sent}\n"
 pesan += f"📝 {risk_ket}\n\n"
-
-if kalender:
-    pesan += "---\n\n"
-    pesan += "📅 *KALENDER EKONOMI:*\n\n"
-    for e in kalender:
-        pesan += f"• {e[:80]}\n"
-    pesan += "\n"
 
 if berita_list:
     pesan += "---\n\n"
@@ -522,37 +474,30 @@ if berita_list:
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
 # ============ KIRIM ============
-# Kirim alert terpisah
 if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
-    requests.post(url_alert, data={
-        "chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"
-    })
+    requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
 
-# Kirim chart
 if data_pairs.get("GOLD"):
     chart_path = bikin_chart(data_pairs["GOLD"], "chart_gold.png", "Gold (XAUUSD) D1")
     if chart_path:
         kirim_foto_telegram(chart_path, caption="📈 Chart Gold D1")
 
-# Kirim pesan utama
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
-r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"})
-print("Terkirim!" if r.status_code == 200 else f"Gagal: {r.json()}")
 
-# ============ WEEKLY REPORT (Kalau Minggu) ============
-if is_minggu:
-    print("Hari Minggu! Bikin weekly report...")
-    weekly = buat_weekly_report(hasil_pairs, dxy, dxy_chg, yield10, yield_chg)
-    if weekly:
-        pesan_weekly = "📅 *WEEKLY REPORT*\n"
-        pesan_weekly += f"📆 {tanggal}\n\n"
-        pesan_weekly += weekly
-        pesan_weekly += "\n\n⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
-        
-        r_weekly = requests.post(url_tg, data={
-            "chat_id": CHAT_ID, "text": pesan_weekly, "parse_mode": "Markdown"
-        })
-        print("Weekly report terkirim!" if r_weekly.status_code == 200 else "Weekly gagal")
+# Pecah pesan kalau kepanjangan
+max_len = 4000
+potongan = []
+while len(pesan) > max_len:
+    idx = pesan.rfind("\n", 0, max_len)
+    if idx == -1:
+        idx = max_len
+    potongan.append(pesan[:idx])
+    pesan = pesan[idx:].lstrip()
+potongan.append(pesan)
+
+for i, bagian in enumerate(potongan):
+    r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
+    print(f"Bagian {i+1} terkirim!" if r.status_code == 200 else f"Bagian {i+1} gagal")
 
 print("Selesai!")
