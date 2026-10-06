@@ -1,10 +1,55 @@
 import requests
+import feedparser
 import os
 from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
+# ============ RSS BERITA GOLD ============
+RSS_BERITA = [
+    "https://www.fxstreet.com/rss/news",
+    "https://www.kitco.com/rss/KitcoNews.xml",
+    "https://www.investing.com/rss/news_285.rss"
+]
+
+def ambil_berita_gold():
+    """Ambil berita gold + sentiment sederhana"""
+    berita_list = []
+    for url in RSS_BERITA:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:3]:
+                judul = entry.title.lower()
+                # Sentiment sederhana
+                positif = ["rally", "surge", "gain", "rise", "bullish", "up", "high", "record"]
+                negatif = ["fall", "drop", "decline", "bearish", "down", "low", "crash", "plunge"]
+                
+                skor = 0
+                for kata in positif:
+                    if kata in judul:
+                        skor += 1
+                for kata in negatif:
+                    if kata in judul:
+                        skor -= 1
+                
+                if skor > 0:
+                    sentimen = "🟢 Bullish"
+                elif skor < 0:
+                    sentimen = "🔴 Bearish"
+                else:
+                    sentimen = "⚪ Netral"
+                
+                berita_list.append({
+                    "judul": entry.title,
+                    "sentimen": sentimen,
+                    "link": entry.link
+                })
+        except:
+            pass
+    return berita_list[:5]
+
+# ============ AMBIL HARGA ============
 def ambil_harga(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -184,7 +229,6 @@ def probabilitas_tf(data, nama_tf):
     return prob_bull, prob_bear, trend, ket, bos, mss
 
 def hitung_risk_sentiment(dxy_chg, yield_chg):
-    """Risk sentiment berdasarkan DXY & Yield"""
     skor = 0
     if dxy_chg is not None:
         skor += dxy_chg * 10
@@ -194,12 +238,11 @@ def hitung_risk_sentiment(dxy_chg, yield_chg):
     if skor > 5:
         return "RISK-OFF", "DXY & Yield naik -> investor cari aman (bullish gold)"
     elif skor < -5:
-        return "RISK-ON", "DXY & Yield turun -> investor risk appetite (bearish gold)"
+        return "RISK-ON", "DXY & Yield turun -> risk appetite (bearish gold)"
     else:
         return "NETRAL", "Sentimen campur"
 
 def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob):
-    """Saran entry/SL/TP berdasarkan probabilitas & OB"""
     if prob_bull >= 60:
         bias = "BUY"
         if bull_ob:
@@ -234,6 +277,7 @@ def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob)
         "rr": round(rr, 2)
     }
 
+# ============ MAIN ============
 print("Ambil data...")
 gold, gold_chg = ambil_harga("GC=F")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
@@ -241,27 +285,24 @@ yield10, yield_chg = ambil_harga("^TNX")
 
 print("Ambil data H1...")
 data_h1 = ambil_ohlc("GC=F", interval="1h", range_="1mo")
-print(f"H1: {len(data_h1)}")
-
 print("Gabung H1 jadi H4...")
 data_h4 = gabung_h4(data_h1)
-print(f"H4: {len(data_h4)}")
-
 print("Ambil data M15...")
 data_m15 = ambil_ohlc("GC=F", interval="15m", range_="7d")
-print(f"M15: {len(data_m15)}")
-
 print("Ambil data D1...")
 data_d1 = ambil_ohlc("GC=F", interval="1d", range_="6mo")
-print(f"D1: {len(data_d1)}")
+
+print("Ambil berita...")
+berita_list = ambil_berita_gold()
+print(f"Berita: {len(berita_list)}")
 
 # Probabilitas per TF
-prob_d1_bull, prob_d1_bear, trend_d1, ket_d1, _, _ = probabilitas_tf(data_d1, "D1")
-prob_h4_bull, prob_h4_bear, trend_h4, ket_h4, _, _ = probabilitas_tf(data_h4, "H4")
-prob_h1_bull, prob_h1_bear, trend_h1, ket_h1, _, _ = probabilitas_tf(data_h1, "H1")
-prob_m15_bull, prob_m15_bear, trend_m15, ket_m15, _, _ = probabilitas_tf(data_m15, "M15")
+prob_d1_bull, prob_d1_bear, trend_d1, _, _, _ = probabilitas_tf(data_d1, "D1")
+prob_h4_bull, prob_h4_bear, trend_h4, _, _, _ = probabilitas_tf(data_h4, "H4")
+prob_h1_bull, prob_h1_bear, trend_h1, _, _, _ = probabilitas_tf(data_h1, "H1")
+prob_m15_bull, prob_m15_bear, trend_m15, _, _, _ = probabilitas_tf(data_m15, "M15")
 
-# Gabungan (bobot: D1 30%, H4 30%, H1 25%, M15 15%)
+# Gabungan
 prob_bull_total = round(prob_d1_bull*0.30 + prob_h4_bull*0.30 + prob_h1_bull*0.25 + prob_m15_bull*0.15)
 prob_bear_total = 100 - prob_bull_total
 
@@ -272,10 +313,22 @@ risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 bull_ob_h4, bear_ob_h4 = deteksi_ob(data_h4)
 saran = hitung_saran_trading(prob_bull_total, prob_bear_total, gold, bull_ob_h4, bear_ob_h4)
 
+# Alert check
+alert = None
+if prob_bull_total >= 80:
+    alert = f"🚨 ALERT: STRONG BULLISH {prob_bull_total}%!"
+elif prob_bear_total >= 80:
+    alert = f"🚨 ALERT: STRONG BEARISH {prob_bear_total}%!"
+elif saran and saran["rr"] >= 3:
+    alert = f"🔥 ALERT: RR 1:{saran['rr']} — Setup bagus!"
+
 # ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
 pesan = "📊 *DATA MARKET GOLD*\n"
 pesan += f"📅 {tanggal}\n\n"
+
+if alert:
+    pesan += f"{alert}\n\n"
 
 if gold:
     pesan += f"🥇 *GOLD*: ${round(gold, 2)} ({round(gold_chg, 2)}%)\n"
@@ -285,22 +338,14 @@ if yield10:
     pesan += f"📈 *US 10Y*: {round(yield10, 3)}% ({round(yield_chg, 3)}%)\n"
 
 pesan += "\n---\n\n"
-pesan += "🎯 *PROBABILITAS MULTI-TIMEFRAME*\n\n"
-
-pesan += f"📆 *D1 (Bulanan):* {prob_d1_bull}% Bull / {prob_d1_bear}% Bear\n"
-pesan += f"   Trend: {trend_d1}\n\n"
-
-pesan += f"🗓️ *H4 (Mingguan):* {prob_h4_bull}% Bull / {prob_h4_bear}% Bear\n"
-pesan += f"   Trend: {trend_h4}\n\n"
-
-pesan += f"📅 *H1 (Harian):* {prob_h1_bull}% Bull / {prob_h1_bear}% Bear\n"
-pesan += f"   Trend: {trend_h1}\n\n"
-
-pesan += f"⏰ *M15 (Pendek):* {prob_m15_bull}% Bull / {prob_m15_bear}% Bear\n"
-pesan += f"   Trend: {trend_m15}\n\n"
+pesan += "🎯 *MULTI-TIMEFRAME*\n\n"
+pesan += f"📆 D1: {prob_d1_bull}%/{prob_d1_bear}% ({trend_d1})\n"
+pesan += f"🗓️ H4: {prob_h4_bull}%/{prob_h4_bear}% ({trend_h4})\n"
+pesan += f"📅 H1: {prob_h1_bull}%/{prob_h1_bear}% ({trend_h1})\n"
+pesan += f"⏰ M15: {prob_m15_bull}%/{prob_m15_bear}% ({trend_m15})\n\n"
 
 pesan += "---\n\n"
-pesan += "💡 *KESIMPULAN GABUNGAN:*\n\n"
+pesan += "💡 *KESIMPULAN:*\n"
 pesan += f"📈 Bullish: *{prob_bull_total}%*\n"
 pesan += f"📉 Bearish: *{prob_bear_total}%*\n\n"
 
@@ -313,7 +358,7 @@ elif prob_bear_total >= 65:
 elif prob_bear_total >= 55:
     pesan += "🎯 Bias: *BEARISH*\n\n"
 else:
-    pesan += "🎯 Bias: *NETRAL / RANGING*\n\n"
+    pesan += "🎯 Bias: *NETRAL*\n\n"
 
 pesan += "---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
@@ -329,9 +374,12 @@ if saran:
     pesan += f"🎯 TP1: ${saran['tp1']}\n"
     pesan += f"🎯 TP2: ${saran['tp2']}\n"
     pesan += f"📊 RR: 1:{saran['rr']}\n\n"
-else:
+
+if berita_list:
     pesan += "---\n\n"
-    pesan += "💰 *SARAN:* Tunggu sinyal lebih jelas\n\n"
+    pesan += "📰 *BERITA GOLD:*\n\n"
+    for b in berita_list:
+        pesan += f"{b['sentimen']}\n{b['judul'][:80]}...\n\n"
 
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
