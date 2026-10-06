@@ -599,9 +599,20 @@ Maksimal 500 kata. Gunakan istilah teknis tepat. Analisis mendalam, bukan dangka
 
 
 def hitung_risk_calculator(hasil_pairs, balance, risk_persen):
-    """Hitung position sizing berdasarkan risk %"""
+    """Hitung position sizing dalam LOT STANDAR"""
     if not balance or not risk_persen:
         return None
+    
+    CONTRACT_SIZE = {
+        "GOLD": 100,
+        "EURUSD": 100000,
+        "BTC": 1,
+        "OIL": 100,
+        "SILVER": 5000,
+        "SP500": 50,
+        "USDJPY": 100000,
+        "GBPUSD": 100000
+    }
     
     risk_amount = balance * (risk_persen / 100)
     hasil = {
@@ -611,32 +622,28 @@ def hitung_risk_calculator(hasil_pairs, balance, risk_persen):
         "pairs": []
     }
     
-    # Cuma hitung top 3 pair
     for kode, h in list(hasil_pairs.items())[:3]:
         if not h["harga"]:
             continue
         
-        # Ambil OB terakhir sebagai SL
         if h["prob_bull"] > h["prob_bear"]:
             bias = "BUY"
             entry = h["harga"]
-            sl = entry * 0.99  # SL 1% di bawah
-            tp = entry * 1.02  # TP 2% di atas
+            sl = entry * 0.99
+            tp = entry * 1.02
         else:
             bias = "SELL"
             entry = h["harga"]
-            sl = entry * 1.01  # SL 1% di atas
-            tp = entry * 0.98  # TP 2% di bawah
+            sl = entry * 1.01
+            tp = entry * 0.98
         
-        # Hitung risk per unit
         risk_per_unit = abs(entry - sl)
         if risk_per_unit == 0:
             continue
         
-        # Position size = risk_amount / risk_per_unit
-        position_size = risk_amount / risk_per_unit
+        cs = CONTRACT_SIZE.get(kode, 1)
+        position_lot = risk_amount / (risk_per_unit * cs)
         
-        # RR
         reward = abs(tp - entry)
         rr = round(reward / risk_per_unit, 2) if risk_per_unit > 0 else 0
         
@@ -648,12 +655,13 @@ def hitung_risk_calculator(hasil_pairs, balance, risk_persen):
             "entry": round(entry, 4),
             "sl": round(sl, 4),
             "tp": round(tp, 4),
-            "position_size": round(position_size, 4),
+            "lot": round(position_lot, 4),
             "rr": rr,
             "prob": max(h["prob_bull"], h["prob_bear"])
         })
     
     return hasil
+    
 # ============ MAIN ============
 print("Ambil data multi-pair...")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
