@@ -292,6 +292,96 @@ def hitung_korelasi(data1, data2):
         return None
     return round(num / (den1 * den2), 2)
 
+def bikin_chart_smc(data, nama_file, judul="Chart SMC"):
+    """Chart dengan SMC annotations: Swing H/L, BOS, MSS"""
+    if len(data) < 10:
+        return None
+    try:
+        data_50 = data[-50:]
+        closes = [d["close"] for d in data_50]
+        highs = [d["high"] for d in data_50]
+        lows = [d["low"] for d in data_50]
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(closes, label="Close", color="blue", linewidth=1.5)
+        
+        # Deteksi swing
+        sh, sl = deteksi_swing(data_50)
+        trend, ket = analisis_trend(sh, sl)
+        
+        # Tandai Swing High
+        for s in sh:
+            ax.scatter(s["index"], s["harga"], color="red", marker="v", s=50, zorder=5)
+            ax.annotate("SH", (s["index"], s["harga"]), fontsize=7, color="red")
+        
+        # Tandai Swing Low
+        for s in sl:
+            ax.scatter(s["index"], s["harga"], color="green", marker="^", s=50, zorder=5)
+            ax.annotate("SL", (s["index"], s["harga"]), fontsize=7, color="green")
+        
+        # Garis horizontal di swing terakhir
+        if sh:
+            ax.axhline(y=sh[-1]["harga"], color="red", linestyle="--", alpha=0.4, linewidth=1)
+        if sl:
+            ax.axhline(y=sl[-1]["harga"], color="green", linestyle="--", alpha=0.4, linewidth=1)
+        
+        # Info trend di chart
+        ax.set_title(f"{judul} | Trend: {trend} ({ket})")
+        ax.set_ylabel("Harga")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(nama_file, dpi=70)
+        plt.close()
+        return nama_file
+    except Exception as e:
+        print(f"Error SMC chart: {e}")
+        return None
+
+def bikin_chart_korelasi(korelasi_list, nama_file):
+    """Chart korelasi antar aset"""
+    if not korelasi_list:
+        return None
+    try:
+        top = korelasi_list[:8]
+        labels = []
+        values = []
+        colors = []
+        
+        for k1, k2, kor in top:
+            e1 = PAIRS[k1]["emoji"]
+            e2 = PAIRS[k2]["emoji"]
+            labels.append(f"{e1} vs {e2}")
+            values.append(kor)
+            if kor > 0.5:
+                colors.append("green")
+            elif kor > 0:
+                colors.append("lightgreen")
+            elif kor > -0.5:
+                colors.append("orange")
+            else:
+                colors.append("red")
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        bars = ax.barh(labels, values, color=colors)
+        ax.axvline(x=0, color="black", linewidth=0.8)
+        ax.set_xlabel("Korelasi")
+        ax.set_title("Korelasi Matrix")
+        ax.grid(True, alpha=0.3, axis="x")
+        
+        # Tambah nilai
+        for bar, val in zip(bars, values):
+            ax.text(val + (0.05 if val > 0 else -0.05), bar.get_y() + bar.get_height()/2,
+                    f"{val}", va="center", ha="left" if val > 0 else "right", fontsize=8)
+        
+        plt.tight_layout()
+        plt.savefig(nama_file, dpi=70)
+        plt.close()
+        return nama_file
+    except Exception as e:
+        print(f"Error korelasi chart: {e}")
+        return None
+
 def bikin_chart_ob_fvg(data, nama_file, judul="Chart", bull_ob=None, bear_ob=None, bull_fvg=None, bear_fvg=None):
     if len(data) < 10:
         return None
@@ -347,7 +437,6 @@ def bikin_chart(data, nama_file, judul="Chart"):
         return None
 
 def bikin_chart_multi_tf(symbol, nama_file, judul="Chart"):
-    """Bikin chart dengan 4 timeframe"""
     data_d1 = ambil_ohlc(symbol, "1d", "6mo")
     data_h1 = ambil_ohlc(symbol, "1h", "1mo")
     data_m15 = ambil_ohlc(symbol, "15m", "7d")
@@ -358,21 +447,18 @@ def bikin_chart_multi_tf(symbol, nama_file, judul="Chart"):
     try:
         fig, axes = plt.subplots(3, 1, figsize=(10, 10))
         
-        # D1
         closes_d1 = [d["close"] for d in data_d1[-50:]]
         axes[0].plot(closes_d1, color="blue", linewidth=1.5)
         axes[0].set_title(f"{judul} - D1 (Daily)")
         axes[0].set_ylabel("Harga")
         axes[0].grid(True, alpha=0.3)
         
-        # H1
         closes_h1 = [d["close"] for d in data_h1[-50:]]
         axes[1].plot(closes_h1, color="green", linewidth=1.2)
         axes[1].set_title("H1 (Hourly)")
         axes[1].set_ylabel("Harga")
         axes[1].grid(True, alpha=0.3)
         
-        # M15
         closes_m15 = [d["close"] for d in data_m15[-50:]]
         axes[2].plot(closes_m15, color="red", linewidth=1)
         axes[2].set_title("M15 (15 Min)")
@@ -609,25 +695,38 @@ if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
 
-# ============ CHART GOLD MULTI-TF ============
+# Chart Gold SMC
+print("Bikin chart Gold SMC...")
+data_h1_gold = ambil_ohlc("GC=F", "1h", "1mo")
+if data_h1_gold:
+    chart_smc = bikin_chart_smc(data_h1_gold, "chart_gold_smc.png", "Gold (XAUUSD) H1")
+    if chart_smc:
+        kirim_foto_telegram(chart_smc, caption="📈 Chart Gold H1 - SMC (Swing H/L, Trend)")
+
+# Chart Gold Multi-TF
 print("Bikin chart Gold Multi-TF...")
 chart_mtf = bikin_chart_multi_tf("GC=F", "chart_gold_mtf.png", "Gold (XAUUSD)")
 if chart_mtf:
     kirim_foto_telegram(chart_mtf, caption="📈 Chart Gold Multi-Timeframe (D1/H1/M15)")
 
-# ============ CHART GOLD DENGAN OB & FVG ============
-print("Bikin chart Gold dengan OB/FVG...")
-data_h1_gold = ambil_ohlc("GC=F", "1h", "1mo")
+# Chart Gold OB/FVG
+print("Bikin chart Gold OB/FVG...")
 if data_h1_gold:
     bull_ob, bear_ob = deteksi_ob(data_h1_gold)
     bull_fvg, bear_fvg = deteksi_fvg(data_h1_gold)
-    chart_path = bikin_chart_ob_fvg(data_h1_gold, "chart_gold_ob.png", "Gold (XAUUSD) H1 + OB/FVG", bull_ob, bear_ob, bull_fvg, bear_fvg)
-    if chart_path:
-        kirim_foto_telegram(chart_path, caption="📈 Chart Gold H1 + OB/FVG")
+    chart_ob = bikin_chart_ob_fvg(data_h1_gold, "chart_gold_ob.png", "Gold (XAUUSD) H1 + OB/FVG", bull_ob, bear_ob, bull_fvg, bear_fvg)
+    if chart_ob:
+        kirim_foto_telegram(chart_ob, caption="📈 Chart Gold H1 + OB/FVG")
+
+# Chart Korelasi
+print("Bikin chart korelasi...")
+chart_kor = bikin_chart_korelasi(korelasi_list, "chart_korelasi.png")
+if chart_kor:
+    kirim_foto_telegram(chart_kor, caption="📊 Chart Korelasi Matrix")
 
 # Chart Top 3 (max 2)
 print("Bikin chart Top 3...")
-for i, r in enumerate(top3[:2], 1):
+for i, r in enumerate(top3[:1], 1):  # Max 1 chart
     data_chart = ambil_ohlc(r["symbol"], "1d", "6mo")
     if data_chart:
         chart_file = f"chart_{r['kode'].lower()}.png"
