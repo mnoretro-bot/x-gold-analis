@@ -5,7 +5,6 @@ from datetime import datetime
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# ============ AMBIL HARGA ============
 def ambil_harga(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -21,7 +20,6 @@ def ambil_harga(symbol):
         print(f"Error: {e}")
     return None, None
 
-# ============ AMBIL OHLC ============
 def ambil_ohlc(symbol, interval="1h", range_="1mo"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -41,7 +39,6 @@ def ambil_ohlc(symbol, interval="1h", range_="1mo"):
     except:
         return []
 
-# ============ GABUNG CANDLE H1 -> H4 ============
 def gabung_h4(data_h1):
     h4 = []
     for i in range(0, len(data_h1) - 3, 4):
@@ -54,7 +51,6 @@ def gabung_h4(data_h1):
         })
     return h4
 
-# ============ SWING ============
 def deteksi_swing(data, kiri=2, kanan=2):
     sh, sl = [], []
     for i in range(kiri, len(data) - kanan):
@@ -68,7 +64,6 @@ def deteksi_swing(data, kiri=2, kanan=2):
             sl.append({"index": i, "harga": data[i]["low"]})
     return sh, sl
 
-# ============ TREND ============
 def analisis_trend(sh, sl):
     if len(sh) < 2 or len(sl) < 2:
         return "RANGING", "Data kurang", 0
@@ -86,7 +81,6 @@ def analisis_trend(sh, sl):
         return "BEARISH", "LH + LL", -1
     return "RANGING", "Mixed", 0
 
-# ============ BOS & MSS ============
 def deteksi_bos_mss(data, sh, sl, trend):
     if not sh or not sl:
         return None, None
@@ -104,7 +98,6 @@ def deteksi_bos_mss(data, sh, sl, trend):
             mss = f"MSS Bearish (${round(sl[-1]['harga'], 2)})"
     return bos, mss
 
-# ============ ORDER BLOCK ============
 def deteksi_ob(data):
     bull, bear = [], []
     for i in range(1, len(data) - 1):
@@ -120,7 +113,6 @@ def deteksi_ob(data):
                 bear.append({"atas": data[i]["high"], "bawah": data[i]["low"]})
     return bull, bear
 
-# ============ FVG ============
 def deteksi_fvg(data):
     bull, bear = [], []
     for i in range(1, len(data) - 1):
@@ -130,33 +122,46 @@ def deteksi_fvg(data):
             bear.append({"atas": data[i-1]["low"], "bawah": data[i+1]["high"]})
     return bull, bear
 
-# ============ PROBABILITAS PER TIMEFRAME ============
 def probabilitas_tf(data, nama_tf):
     sh, sl = deteksi_swing(data)
     trend, ket, skor_trend = analisis_trend(sh, sl)
     
     bobot = {"bullish": 0, "bearish": 0, "netral": 0}
     
-    # Trend (bobot 100)
     if trend == "BULLISH":
-        bobot["bullish"] += 100
+        bobot["bullish"] += 50
     elif trend == "BEARISH":
-        bobot["bearish"] += 100
+        bobot["bearish"] += 50
     else:
-        bobot["netral"] += 100
+        bobot["netral"] += 50
     
-    # Cek BOS/MSS di timeframe ini
     bos, mss = deteksi_bos_mss(data, sh, sl, trend)
     if bos:
         if "Bullish" in bos:
-            bobot["bullish"] += 50
+            bobot["bullish"] += 30
         else:
-            bobot["bearish"] += 50
+            bobot["bearish"] += 30
     if mss:
         if "Bullish" in mss:
-            bobot["bullish"] += 50
+            bobot["bullish"] += 30
         else:
-            bobot["bearish"] += 50
+            bobot["bearish"] += 30
+    
+    bull_ob, bear_ob = deteksi_ob(data)
+    if bull_ob and not bear_ob:
+        bobot["bullish"] += 15
+    elif bear_ob and not bull_ob:
+        bobot["bearish"] += 15
+    else:
+        bobot["netral"] += 15
+    
+    bull_fvg, bear_fvg = deteksi_fvg(data)
+    if bull_fvg and not bear_fvg:
+        bobot["bullish"] += 5
+    elif bear_fvg and not bull_fvg:
+        bobot["bearish"] += 5
+    else:
+        bobot["netral"] += 5
     
     netral_setengah = bobot["netral"] / 2
     skor_bull = bobot["bullish"] + netral_setengah
@@ -165,11 +170,19 @@ def probabilitas_tf(data, nama_tf):
     
     if total == 0:
         return 50, 50, trend, ket, bos, mss
+    
     prob_bull = round((skor_bull / total) * 100)
     prob_bear = 100 - prob_bull
+    
+    if prob_bull < 10:
+        prob_bull = 10
+        prob_bear = 90
+    elif prob_bear < 10:
+        prob_bear = 10
+        prob_bull = 90
+    
     return prob_bull, prob_bear, trend, ket, bos, mss
 
-# ============ MAIN ============
 print("Ambil data...")
 gold, gold_chg = ambil_harga("GC=F")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
@@ -187,16 +200,13 @@ print("Ambil data M15...")
 data_m15 = ambil_ohlc("GC=F", interval="15m", range_="7d")
 print(f"M15 candles: {len(data_m15)}")
 
-# Hitung probabilitas per timeframe
 prob_h4_bull, prob_h4_bear, trend_h4, ket_h4, bos_h4, mss_h4 = probabilitas_tf(data_h4, "H4")
 prob_h1_bull, prob_h1_bear, trend_h1, ket_h1, bos_h1, mss_h1 = probabilitas_tf(data_h1, "H1")
 prob_m15_bull, prob_m15_bear, trend_m15, ket_m15, bos_m15, mss_m15 = probabilitas_tf(data_m15, "M15")
 
-# Probabilitas gabungan (bobot: H4 40%, H1 35%, M15 25%)
 prob_bull_total = round(prob_h4_bull * 0.4 + prob_h1_bull * 0.35 + prob_m15_bull * 0.25)
 prob_bear_total = 100 - prob_bull_total
 
-# ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
 pesan = "📊 *DATA MARKET GOLD*\n"
 pesan += f"📅 {tanggal}\n\n"
@@ -231,7 +241,6 @@ pesan += "💡 *KESIMPULAN GABUNGAN:*\n\n"
 pesan += f"📈 Bullish: *{prob_bull_total}%*\n"
 pesan += f"📉 Bearish: *{prob_bear_total}%*\n\n"
 
-# Interpretasi
 if prob_bull_total >= 65:
     pesan += "🎯 Bias: *STRONG BULLISH*\n"
 elif prob_bull_total >= 55:
@@ -243,7 +252,6 @@ elif prob_bear_total >= 55:
 else:
     pesan += "🎯 Bias: *NETRAL / RANGING*\n"
 
-# ============ KIRIM ============
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"})
 print("Terkirim!" if r.status_code == 200 else f"Gagal: {r.json()}")
