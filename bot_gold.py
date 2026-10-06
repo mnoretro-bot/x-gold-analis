@@ -11,14 +11,14 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
 PAIRS = {
-    "GOLD": {"symbol": "GC=F", "emoji": "🥇", "nama": "Gold (XAUUSD)"},
-    "EURUSD": {"symbol": "EURUSD=X", "emoji": "💶", "nama": "EURUSD"},
-    "BTC": {"symbol": "BTC-USD", "emoji": "₿", "nama": "Bitcoin"},
-    "OIL": {"symbol": "CL=F", "emoji": "🛢️", "nama": "Crude Oil"},
-    "SILVER": {"symbol": "SI=F", "emoji": "🥈", "nama": "Silver"},
-    "SP500": {"symbol": "^GSPC", "emoji": "📈", "nama": "S&P 500"},
-    "USDJPY": {"symbol": "JPY=X", "emoji": "💴", "nama": "USDJPY"},
-    "GBPUSD": {"symbol": "GBPUSD=X", "emoji": "💷", "nama": "GBPUSD"}
+    "GOLD": {"symbol": "GC=F", "emoji": "🥇", "nama": "Gold (XAUUSD)", "sector": "Commodities"},
+    "EURUSD": {"symbol": "EURUSD=X", "emoji": "💶", "nama": "EURUSD", "sector": "Forex"},
+    "BTC": {"symbol": "BTC-USD", "emoji": "₿", "nama": "Bitcoin", "sector": "Crypto"},
+    "OIL": {"symbol": "CL=F", "emoji": "🛢️", "nama": "Crude Oil", "sector": "Commodities"},
+    "SILVER": {"symbol": "SI=F", "emoji": "🥈", "nama": "Silver", "sector": "Commodities"},
+    "SP500": {"symbol": "^GSPC", "emoji": "📈", "nama": "S&P 500", "sector": "Indices"},
+    "USDJPY": {"symbol": "JPY=X", "emoji": "💴", "nama": "USDJPY", "sector": "Forex"},
+    "GBPUSD": {"symbol": "GBPUSD=X", "emoji": "💷", "nama": "GBPUSD", "sector": "Forex"}
 }
 
 RSS_BERITA = [
@@ -379,7 +379,8 @@ for kode, info in PAIRS.items():
         "prob_bull": mtf["GABUNGAN"]["bull"],
         "prob_bear": mtf["GABUNGAN"]["bear"],
         "trend": mtf["H4"]["trend"],
-        "emoji": info["emoji"], "nama": info["nama"]
+        "emoji": info["emoji"], "nama": info["nama"],
+        "sector": info["sector"]
     }
     data_pairs[kode] = data_d1
 
@@ -401,10 +402,18 @@ for i in range(len(kode_list)):
             if kor is not None:
                 korelasi_list.append((k1, k2, kor))
 
-# Sort by absolute value
 korelasi_list.sort(key=lambda x: abs(x[2]), reverse=True)
 
-# ============ ALERT ============
+# ============ SECTOR ANALYSIS ============
+print("Analisis sector...")
+sector_hasil = {}
+for kode, h in hasil_pairs.items():
+    sector = h["sector"]
+    if sector not in sector_hasil:
+        sector_hasil[sector] = []
+    sector_hasil[sector].append(h)
+
+# ============ ALERT MULTI-LEVEL ============
 alert_khusus = None
 for kode, h in hasil_pairs.items():
     if h["prob_bull"] >= 80:
@@ -438,6 +447,18 @@ for kode, h in hasil_pairs.items():
     pesan += f"⏰ M15: {mtf['M15']['bull']}/{mtf['M15']['bear']} ({mtf['M15']['trend']})\n"
     pesan += f"🎯 *Gabungan: {mtf['GABUNGAN']['bull']}%/{mtf['GABUNGAN']['bear']}%*\n\n"
 
+# Sector Analysis
+pesan += "---\n\n"
+pesan += "🏭 *SECTOR ANALYSIS:*\n\n"
+for sector, pairs in sector_hasil.items():
+    pesan += f"*{sector}:*\n"
+    for h in pairs:
+        bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
+        kekuatan = max(h["prob_bull"], h["prob_bear"])
+        pesan += f"  {h['emoji']} {h['nama']}: {bias} ({kekuatan}%)\n"
+    pesan += "\n"
+
+# Korelasi Matrix
 pesan += "---\n\n"
 pesan += "📊 *KORELASI MATRIX (Top 5):*\n\n"
 for k1, k2, kor in korelasi_list[:5]:
@@ -495,7 +516,7 @@ for i, bagian in enumerate(potongan):
     r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
     print(f"Bagian {i+1} terkirim!" if r.status_code == 200 else f"Bagian {i+1} gagal")
 
-# ============ TRADING JOURNAL (DENGAN TF) ============
+# ============ TRADING JOURNAL ============
 print("Bikin trading journal...")
 
 ranking = []
@@ -504,12 +525,8 @@ for kode, h in hasil_pairs.items():
     bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
     mtf = mtf_results[kode]
     ranking.append({
-        "kode": kode,
-        "nama": h["nama"],
-        "emoji": h["emoji"],
-        "bias": bias,
-        "prob": kekuatan,
-        "mtf": mtf
+        "kode": kode, "nama": h["nama"], "emoji": h["emoji"],
+        "bias": bias, "prob": kekuatan, "mtf": mtf, "sector": h["sector"]
     })
 
 ranking.sort(key=lambda x: x["prob"], reverse=True)
