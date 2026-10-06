@@ -993,7 +993,7 @@ if risk_calc:
         pesan_risk += f"📍 Entry: {p['entry']}\n"
         pesan_risk += f"🛑 SL: {p['sl']}\n"
         pesan_risk += f"🎯 TP: {p['tp']}\n"
-        pesan_risk += f"📦 Size: {p['position_size']}\n"
+        pesan_risk += f"📦 Lot: {p['lot']}\n"
         pesan_risk += f"📊 RR: 1:{p['rr']}\n\n"
     r_risk = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan_risk, "parse_mode": "Markdown"})
     print("Risk calculator terkirim!" if r_risk.status_code == 200 else "Risk gagal")
