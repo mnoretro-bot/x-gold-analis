@@ -5,55 +5,67 @@ from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
-# ============ RSS BERITA GOLD ============
 RSS_BERITA = [
     "https://www.fxstreet.com/rss/news",
     "https://www.kitco.com/rss/KitcoNews.xml",
     "https://www.investing.com/rss/news_285.rss"
 ]
 
+def analisis_berita_ai(judul_berita):
+    """Analisis berita pakai Groq AI"""
+    if not GROQ_KEY:
+        return "⚪ Netral"
+    
+    prompt = f"""Analisis sentimen berita ini untuk GOLD (XAUUSD).
+Jawab HANYA dengan 1 kata: BULLISH, BEARISH, atau NETRAL.
+
+Berita: {judul_berita}
+
+Jawaban:"""
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": "Bearer " + GROQ_KEY,
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "openai/gpt-oss-20b",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=15)
+        hasil = r.json()
+        if "choices" in hasil:
+            jawaban = hasil["choices"][0]["message"]["content"].strip().upper()
+            if "BULLISH" in jawaban:
+                return "🟢 Bullish"
+            elif "BEARISH" in jawaban:
+                return "🔴 Bearish"
+            else:
+                return "⚪ Netral"
+    except:
+        pass
+    return "⚪ Netral"
+
 def ambil_berita_gold():
-    """Ambil berita gold + sentiment sederhana"""
+    """Ambil berita gold + sentiment AI"""
     berita_list = []
     for url in RSS_BERITA:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
-                judul = entry.title.lower()
-                # Sentiment sederhana
-                positif = ["rally", "surge", "gain", "rise", "bullish", "up", "high", "record", 
-                           "soar", "jump", "climb", "boost", "support", "strong", "upside",
-                           "recovery", "rebound", "optimism", "hope"]
-                negatif = ["fall", "drop", "decline", "bearish", "down", "low", "crash", "plunge",
-                           "slump", "tumble", "sink", "vulnerable", "weak", "pressure", "risk",
-                           "struggle", "dip", "worry", "fear", "sell-off"]               
- 
-                skor = 0
-                for kata in positif:
-                    if kata in judul:
-                        skor += 1
-                for kata in negatif:
-                    if kata in judul:
-                        skor -= 1
-                
-                if skor > 0:
-                    sentimen = "🟢 Bullish"
-                elif skor < 0:
-                    sentimen = "🔴 Bearish"
-                else:
-                    sentimen = "⚪ Netral"
-                
+            for entry in feed.entries[:2]:
+                judul = entry.title
+                sentimen = analisis_berita_ai(judul)
                 berita_list.append({
-                    "judul": entry.title,
-                    "sentimen": sentimen,
-                    "link": entry.link
+                    "judul": judul,
+                    "sentimen": sentimen
                 })
         except:
             pass
     return berita_list[:5]
 
-# ============ AMBIL HARGA ============
 def ambil_harga(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -115,7 +127,7 @@ def deteksi_swing(data, kiri=2, kanan=2):
 
 def analisis_trend(sh, sl):
     if len(sh) < 2 or len(sl) < 2:
-        return "RANGING", "Data kurang", 0
+        return "RANGING", "Data kurang"
     if sh[-1]["harga"] > sh[-2]["harga"]:
         bh = "bullish"
     else:
@@ -125,10 +137,10 @@ def analisis_trend(sh, sl):
     else:
         bl = "bearish"
     if bh == "bullish" and bl == "bullish":
-        return "BULLISH", "HH + HL", 1
+        return "BULLISH", "HH + HL"
     elif bh == "bearish" and bl == "bearish":
-        return "BEARISH", "LH + LL", -1
-    return "RANGING", "Mixed", 0
+        return "BEARISH", "LH + LL"
+    return "RANGING", "Mixed"
 
 def deteksi_bos_mss(data, sh, sl, trend):
     if not sh or not sl:
@@ -173,7 +185,7 @@ def deteksi_fvg(data):
 
 def probabilitas_tf(data, nama_tf):
     sh, sl = deteksi_swing(data)
-    trend, ket, skor_trend = analisis_trend(sh, sl)
+    trend, ket = analisis_trend(sh, sl)
     
     bobot = {"bullish": 0, "bearish": 0, "netral": 0}
     
@@ -218,7 +230,7 @@ def probabilitas_tf(data, nama_tf):
     total = skor_bull + skor_bear
     
     if total == 0:
-        return 50, 50, trend, ket, bos, mss
+        return 50, 50, trend, ket
     
     prob_bull = round((skor_bull / total) * 100)
     prob_bear = 100 - prob_bull
@@ -230,7 +242,7 @@ def probabilitas_tf(data, nama_tf):
         prob_bear = 10
         prob_bull = 90
     
-    return prob_bull, prob_bear, trend, ket, bos, mss
+    return prob_bull, prob_bear, trend, ket
 
 def hitung_risk_sentiment(dxy_chg, yield_chg):
     skor = 0
@@ -240,9 +252,9 @@ def hitung_risk_sentiment(dxy_chg, yield_chg):
         skor += yield_chg * 5
     
     if skor > 5:
-        return "RISK-OFF", "DXY & Yield naik -> investor cari aman (bullish gold)"
+        return "RISK-OFF", "DXY & Yield naik -> bullish gold"
     elif skor < -5:
-        return "RISK-ON", "DXY & Yield turun -> risk appetite (bearish gold)"
+        return "RISK-ON", "DXY & Yield turun -> bearish gold"
     else:
         return "NETRAL", "Sentimen campur"
 
@@ -273,13 +285,41 @@ def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob)
     rr = abs(tp1 - entry) / abs(sl - entry) if abs(sl - entry) > 0 else 0
     
     return {
-        "bias": bias,
-        "entry": round(entry, 2),
-        "sl": round(sl, 2),
-        "tp1": round(tp1, 2),
-        "tp2": round(tp2, 2),
-        "rr": round(rr, 2)
+        "bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
+        "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)
     }
+
+def backtest(data, prob_bull, prob_bear):
+    """Backtest sederhana: hitung win rate 30 hari terakhir"""
+    if len(data) < 30:
+        return None
+    
+    menang = 0
+    total = 0
+    benar_bull = 0
+    
+    if prob_bull >= 60:
+        bias = "BULLISH"
+        benar_bull = 1
+    elif prob_bear >= 60:
+        bias = "BEARISH"
+        benar_bull = 0
+    else:
+        return None
+    
+    for i in range(1, min(30, len(data))):
+        perubahan = data[-i]["close"] - data[-i-1]["close"]
+        if bias == "BULLISH" and perubahan > 0:
+            menang += 1
+        elif bias == "BEARISH" and perubahan < 0:
+            menang += 1
+        total += 1
+    
+    if total == 0:
+        return None
+    
+    win_rate = round((menang / total) * 100)
+    return win_rate
 
 # ============ MAIN ============
 print("Ambil data...")
@@ -287,52 +327,32 @@ gold, gold_chg = ambil_harga("GC=F")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
 yield10, yield_chg = ambil_harga("^TNX")
 
-print("Ambil data H1...")
 data_h1 = ambil_ohlc("GC=F", interval="1h", range_="1mo")
-print("Gabung H1 jadi H4...")
 data_h4 = gabung_h4(data_h1)
-print("Ambil data M15...")
 data_m15 = ambil_ohlc("GC=F", interval="15m", range_="7d")
-print("Ambil data D1...")
 data_d1 = ambil_ohlc("GC=F", interval="1d", range_="6mo")
 
-print("Ambil berita...")
+print("Ambil berita + AI...")
 berita_list = ambil_berita_gold()
 print(f"Berita: {len(berita_list)}")
 
-# Probabilitas per TF
-prob_d1_bull, prob_d1_bear, trend_d1, _, _, _ = probabilitas_tf(data_d1, "D1")
-prob_h4_bull, prob_h4_bear, trend_h4, _, _, _ = probabilitas_tf(data_h4, "H4")
-prob_h1_bull, prob_h1_bear, trend_h1, _, _, _ = probabilitas_tf(data_h1, "H1")
-prob_m15_bull, prob_m15_bear, trend_m15, _, _, _ = probabilitas_tf(data_m15, "M15")
+prob_d1_bull, prob_d1_bear, trend_d1, _ = probabilitas_tf(data_d1, "D1")
+prob_h4_bull, prob_h4_bear, trend_h4, _ = probabilitas_tf(data_h4, "H4")
+prob_h1_bull, prob_h1_bear, trend_h1, _ = probabilitas_tf(data_h1, "H1")
+prob_m15_bull, prob_m15_bear, trend_m15, _ = probabilitas_tf(data_m15, "M15")
 
-# Gabungan
 prob_bull_total = round(prob_d1_bull*0.30 + prob_h4_bull*0.30 + prob_h1_bull*0.25 + prob_m15_bull*0.15)
 prob_bear_total = 100 - prob_bull_total
 
-# Risk sentiment
 risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
-
-# Saran trading
 bull_ob_h4, bear_ob_h4 = deteksi_ob(data_h4)
 saran = hitung_saran_trading(prob_bull_total, prob_bear_total, gold, bull_ob_h4, bear_ob_h4)
-
-# Alert check
-alert = None
-if prob_bull_total >= 80:
-    alert = f"🚨 ALERT: STRONG BULLISH {prob_bull_total}%!"
-elif prob_bear_total >= 80:
-    alert = f"🚨 ALERT: STRONG BEARISH {prob_bear_total}%!"
-elif saran and saran["rr"] >= 3:
-    alert = f"🔥 ALERT: RR 1:{saran['rr']} — Setup bagus!"
+win_rate = backtest(data_d1, prob_bull_total, prob_bear_total)
 
 # ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
 pesan = "📊 *DATA MARKET GOLD*\n"
 pesan += f"📅 {tanggal}\n\n"
-
-if alert:
-    pesan += f"{alert}\n\n"
 
 if gold:
     pesan += f"🥇 *GOLD*: ${round(gold, 2)} ({round(gold_chg, 2)}%)\n"
@@ -364,6 +384,9 @@ elif prob_bear_total >= 55:
 else:
     pesan += "🎯 Bias: *NETRAL*\n\n"
 
+if win_rate is not None:
+    pesan += f"📊 *Backtest 30 hari:* Win rate {win_rate}%\n\n"
+
 pesan += "---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
 pesan += f"🎯 {risk_sent}\n"
@@ -381,7 +404,7 @@ if saran:
 
 if berita_list:
     pesan += "---\n\n"
-    pesan += "📰 *BERITA GOLD:*\n\n"
+    pesan += "📰 *BERITA GOLD (AI Analysis):*\n\n"
     for b in berita_list:
         pesan += f"{b['sentimen']}\n{b['judul'][:80]}...\n\n"
 
