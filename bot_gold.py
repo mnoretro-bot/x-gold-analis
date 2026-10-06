@@ -264,53 +264,6 @@ def hitung_risk_sentiment(dxy_chg, yield_chg):
     else:
         return "NETRAL", "Sentimen campur"
 
-def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob):
-    if prob_bull >= 60:
-        bias = "BUY"
-        if bull_ob:
-            entry = bull_ob[-1]["atas"]
-            sl = bull_ob[-1]["bawah"] - 5
-        else:
-            entry = harga_sekarang
-            sl = harga_sekarang - 20
-        tp1 = entry + 20
-        tp2 = entry + 40
-    elif prob_bear >= 60:
-        bias = "SELL"
-        if bear_ob:
-            entry = bear_ob[-1]["bawah"]
-            sl = bear_ob[-1]["atas"] + 5
-        else:
-            entry = harga_sekarang
-            sl = harga_sekarang + 20
-        tp1 = entry - 20
-        tp2 = entry - 40
-    else:
-        return None
-    rr = abs(tp1 - entry) / abs(sl - entry) if abs(sl - entry) > 0 else 0
-    return {"bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
-            "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)}
-
-def hitung_korelasi(data1, data2):
-    if len(data1) < 10 or len(data2) < 10:
-        return None
-    n = min(len(data1), len(data2), 30)
-    closes1 = [d["close"] for d in data1[-n:]]
-    closes2 = [d["close"] for d in data2[-n:]]
-    chg1 = [closes1[i] - closes1[i-1] for i in range(1, len(closes1))]
-    chg2 = [closes2[i] - closes2[i-1] for i in range(1, len(closes2))]
-    n = len(chg1)
-    if n < 5:
-        return None
-    mean1 = sum(chg1) / n
-    mean2 = sum(chg2) / n
-    num = sum((chg1[i] - mean1) * (chg2[i] - mean2) for i in range(n))
-    den1 = sum((chg1[i] - mean1) ** 2 for i in range(n)) ** 0.5
-    den2 = sum((chg2[i] - mean2) ** 2 for i in range(n)) ** 0.5
-    if den1 == 0 or den2 == 0:
-        return None
-    return round(num / (den1 * den2), 2)
-
 def bikin_chart(data, nama_file, judul="Chart"):
     if len(data) < 10:
         return None
@@ -423,11 +376,20 @@ korelasi_gold_btc = None
 if data_pairs.get("GOLD"):
     dxy_data = ambil_ohlc("DX-Y.NYB", interval="1d", range_="6mo")
     if dxy_data:
-        korelasi_gold_dxy = hitung_korelasi(data_pairs["GOLD"], dxy_data)
-if data_pairs.get("GOLD") and data_pairs.get("OIL"):
-    korelasi_gold_oil = hitung_korelasi(data_pairs["GOLD"], data_pairs["OIL"])
-if data_pairs.get("GOLD") and data_pairs.get("BTC"):
-    korelasi_gold_btc = hitung_korelasi(data_pairs["GOLD"], data_pairs["BTC"])
+        n = min(len(data_pairs["GOLD"]), len(dxy_data), 30)
+        if n >= 10:
+            c1 = [d["close"] for d in data_pairs["GOLD"][-n:]]
+            c2 = [d["close"] for d in dxy_data[-n:]]
+            chg1 = [c1[i] - c1[i-1] for i in range(1, len(c1))]
+            chg2 = [c2[i] - c2[i-1] for i in range(1, len(c2))]
+            if len(chg1) >= 5:
+                m1 = sum(chg1) / len(chg1)
+                m2 = sum(chg2) / len(chg2)
+                num = sum((chg1[i]-m1)*(chg2[i]-m2) for i in range(len(chg1)))
+                d1 = sum((chg1[i]-m1)**2 for i in range(len(chg1))) ** 0.5
+                d2 = sum((chg2[i]-m2)**2 for i in range(len(chg2))) ** 0.5
+                if d1 > 0 and d2 > 0:
+                    korelasi_gold_dxy = round(num / (d1 * d2), 2)
 
 # ============ ALERT ============
 alert_khusus = None
@@ -467,10 +429,6 @@ pesan += "---\n\n"
 pesan += "📊 *KORELASI GOLD:*\n\n"
 if korelasi_gold_dxy is not None:
     pesan += f"• Gold vs DXY: {korelasi_gold_dxy}\n"
-if korelasi_gold_oil is not None:
-    pesan += f"• Gold vs Oil: {korelasi_gold_oil}\n"
-if korelasi_gold_btc is not None:
-    pesan += f"• Gold vs BTC: {korelasi_gold_btc}\n"
 
 pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
@@ -486,7 +444,7 @@ if berita_list:
 
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
-# ============ KIRIM ============
+# ============ KIRIM PESAN UTAMA ============
 if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
@@ -511,5 +469,54 @@ potongan.append(pesan)
 for i, bagian in enumerate(potongan):
     r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
     print(f"Bagian {i+1} terkirim!" if r.status_code == 200 else f"Bagian {i+1} gagal")
+
+# ============ TRADING JOURNAL ============
+print("Bikin trading journal...")
+
+ranking = []
+for kode, h in hasil_pairs.items():
+    kekuatan = max(h["prob_bull"], h["prob_bear"])
+    bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
+    ranking.append({
+        "kode": kode,
+        "nama": h["nama"],
+        "emoji": h["emoji"],
+        "bias": bias,
+        "prob": kekuatan,
+        "harga": h["harga"]
+    })
+
+ranking.sort(key=lambda x: x["prob"], reverse=True)
+top3 = ranking[:3]
+
+journal = "📓 *TRADING JOURNAL*\n"
+journal += f"📅 {tanggal}\n\n"
+
+journal += "🎯 *SINYAL HARI INI:*\n"
+for r in ranking:
+    journal += f"• {r['emoji']} {r['nama']}: *{r['bias']}* ({r['prob']}%)\n"
+
+journal += "\n⭐ *TOP 3 SETUP:*\n"
+for i, r in enumerate(top3, 1):
+    journal += f"{i}. {r['emoji']} {r['nama']} — *{r['bias']}* ({r['prob']}%)\n"
+
+journal += "\n💡 *REKOMENDASI:*\n"
+if top3:
+    terbaik = top3[0]
+    journal += f"Fokus ke {terbaik['emoji']} {terbaik['nama']} — sinyal paling kuat ({terbaik['prob']}%).\n"
+    
+    if terbaik['prob'] >= 80:
+        journal += "🔥 Sinyal SANGAT KUAT — bisa entry langsung.\n"
+    elif terbaik['prob'] >= 65:
+        journal += "✅ Sinyal kuat — tunggu konfirmasi M15.\n"
+    else:
+        journal += "⚠️ Sinyal sedang — tunggu setup lebih jelas.\n"
+
+journal += "\n⚠️ _Bukan jaminan profit. DYOR._"
+
+r_journal = requests.post(url_tg, data={
+    "chat_id": CHAT_ID, "text": journal, "parse_mode": "Markdown"
+})
+print("Journal terkirim!" if r_journal.status_code == 200 else f"Journal gagal: {r_journal.json()}")
 
 print("Selesai!")
