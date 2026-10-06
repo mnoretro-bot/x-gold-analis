@@ -389,8 +389,7 @@ berita_list = ambil_berita_gold()
 print("Ambil kalender...")
 kalender = ambil_kalender_ekonomi()
 
-# Korelasi Matrix
-print("Hitung korelasi...")
+# Korelasi
 korelasi_list = []
 kode_list = list(PAIRS.keys())
 for i in range(len(kode_list)):
@@ -404,7 +403,7 @@ for i in range(len(kode_list)):
 
 korelasi_list.sort(key=lambda x: abs(x[2]), reverse=True)
 
-# ============ SECTOR ANALYSIS ============
+# Sector
 sector_hasil = {}
 for kode, h in hasil_pairs.items():
     sector = h["sector"]
@@ -412,17 +411,29 @@ for kode, h in hasil_pairs.items():
         sector_hasil[sector] = []
     sector_hasil[sector].append(h)
 
-# ============ ALERT KORELASI ============
+# Ranking untuk Top 3
+ranking = []
+for kode, h in hasil_pairs.items():
+    kekuatan = max(h["prob_bull"], h["prob_bear"])
+    bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
+    ranking.append({
+        "kode": kode, "nama": h["nama"], "emoji": h["emoji"],
+        "bias": bias, "prob": kekuatan, "symbol": PAIRS[kode]["symbol"]
+    })
+
+ranking.sort(key=lambda x: x["prob"], reverse=True)
+top3 = ranking[:3]
+
+# ============ ALERT ============
 alert_korelasi = None
 for k1, k2, kor in korelasi_list:
     if kor >= 0.9:
-        alert_korelasi = f"⚡ *ALERT KORELASI TINGGI!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}* (sangat kuat!)\n\nArtinya: 2 aset ini bergerak hampir sama."
+        alert_korelasi = f"⚡ *ALERT KORELASI TINGGI!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}*"
         break
     elif kor <= -0.9:
-        alert_korelasi = f"⚡ *ALERT KORELASI NEGATIF TINGGI!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}* (sangat negatif!)\n\nArtinya: 2 aset ini bergerak berlawanan."
+        alert_korelasi = f"⚡ *ALERT KORELASI NEGATIF!*\n\n{PAIRS[k1]['emoji']} {PAIRS[k1]['nama']} vs {PAIRS[k2]['emoji']} {PAIRS[k2]['nama']}\nKorelasi: *{kor}*"
         break
 
-# ============ ALERT SINYAL ============
 alert_khusus = None
 for kode, h in hasil_pairs.items():
     if h["prob_bull"] >= 80:
@@ -506,10 +517,15 @@ if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
     requests.post(url_alert, data={"chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"})
 
-if data_pairs.get("GOLD"):
-    chart_path = bikin_chart(data_pairs["GOLD"], "chart_gold.png", "Gold (XAUUSD) D1")
-    if chart_path:
-        kirim_foto_telegram(chart_path, caption="📈 Chart Gold D1")
+# Multi-Asset Chart (Top 3)
+print("Bikin chart Top 3...")
+for i, r in enumerate(top3, 1):
+    data_chart = ambil_ohlc(r["symbol"], "1d", "6mo")
+    if data_chart:
+        chart_file = f"chart_{r['kode'].lower()}.png"
+        chart_path = bikin_chart(data_chart, chart_file, f"{r['nama']} D1")
+        if chart_path:
+            kirim_foto_telegram(chart_path, caption=f"{r['emoji']} Chart {r['nama']}")
 
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 
@@ -530,25 +546,12 @@ for i, bagian in enumerate(potongan):
 # ============ TRADING JOURNAL ============
 print("Bikin trading journal...")
 
-ranking = []
-for kode, h in hasil_pairs.items():
-    kekuatan = max(h["prob_bull"], h["prob_bear"])
-    bias = "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL"
-    mtf = mtf_results[kode]
-    ranking.append({
-        "kode": kode, "nama": h["nama"], "emoji": h["emoji"],
-        "bias": bias, "prob": kekuatan, "mtf": mtf
-    })
-
-ranking.sort(key=lambda x: x["prob"], reverse=True)
-top3 = ranking[:3]
-
 journal = "📓 *TRADING JOURNAL*\n"
 journal += f"📅 {tanggal}\n\n"
 
 journal += "🎯 *SINYAL HARI INI:*\n"
 for r in ranking:
-    m = r["mtf"]
+    m = mtf_results[r["kode"]]
     journal += f"• {r['emoji']} {r['nama']}: *{r['bias']}* ({r['prob']}%)\n"
     journal += f"  D1: {m['D1']['bull']}/{m['D1']['bear']} | H4: {m['H4']['bull']}/{m['H4']['bear']} | H1: {m['H1']['bull']}/{m['H1']['bear']} | M15: {m['M15']['bull']}/{m['M15']['bear']}\n"
 
