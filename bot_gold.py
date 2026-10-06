@@ -1,6 +1,9 @@
 import requests
 import feedparser
 import os
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -14,26 +17,17 @@ RSS_BERITA = [
 ]
 
 def analisis_berita_ai(judul_berita):
-    """Analisis berita pakai Groq AI"""
     if not GROQ_KEY:
         return "⚪ Netral"
-    
     prompt = f"""Analisis sentimen berita ini untuk GOLD (XAUUSD).
 Jawab HANYA dengan 1 kata: BULLISH, BEARISH, atau NETRAL.
 
 Berita: {judul_berita}
 
 Jawaban:"""
-    
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": "Bearer " + GROQ_KEY,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "openai/gpt-oss-20b",
-        "messages": [{"role": "user", "content": prompt}]
-    }
+    headers = {"Authorization": "Bearer " + GROQ_KEY, "Content-Type": "application/json"}
+    data = {"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": prompt}]}
     try:
         r = requests.post(url, headers=headers, json=data, timeout=15)
         hasil = r.json()
@@ -50,7 +44,6 @@ Jawaban:"""
     return "⚪ Netral"
 
 def ambil_berita_gold():
-    """Ambil berita gold + sentiment AI"""
     berita_list = []
     for url in RSS_BERITA:
         try:
@@ -58,10 +51,7 @@ def ambil_berita_gold():
             for entry in feed.entries[:2]:
                 judul = entry.title
                 sentimen = analisis_berita_ai(judul)
-                berita_list.append({
-                    "judul": judul,
-                    "sentimen": sentimen
-                })
+                berita_list.append({"judul": judul, "sentimen": sentimen})
         except:
             pass
     return berita_list[:5]
@@ -186,16 +176,13 @@ def deteksi_fvg(data):
 def probabilitas_tf(data, nama_tf):
     sh, sl = deteksi_swing(data)
     trend, ket = analisis_trend(sh, sl)
-    
     bobot = {"bullish": 0, "bearish": 0, "netral": 0}
-    
     if trend == "BULLISH":
         bobot["bullish"] += 50
     elif trend == "BEARISH":
         bobot["bearish"] += 50
     else:
         bobot["netral"] += 50
-    
     bos, mss = deteksi_bos_mss(data, sh, sl, trend)
     if bos:
         if "Bullish" in bos:
@@ -207,7 +194,6 @@ def probabilitas_tf(data, nama_tf):
             bobot["bullish"] += 30
         else:
             bobot["bearish"] += 30
-    
     bull_ob, bear_ob = deteksi_ob(data)
     if bull_ob and not bear_ob:
         bobot["bullish"] += 15
@@ -215,7 +201,6 @@ def probabilitas_tf(data, nama_tf):
         bobot["bearish"] += 15
     else:
         bobot["netral"] += 15
-    
     bull_fvg, bear_fvg = deteksi_fvg(data)
     if bull_fvg and not bear_fvg:
         bobot["bullish"] += 5
@@ -223,25 +208,20 @@ def probabilitas_tf(data, nama_tf):
         bobot["bearish"] += 5
     else:
         bobot["netral"] += 5
-    
     netral_setengah = bobot["netral"] / 2
     skor_bull = bobot["bullish"] + netral_setengah
     skor_bear = bobot["bearish"] + netral_setengah
     total = skor_bull + skor_bear
-    
     if total == 0:
         return 50, 50, trend, ket
-    
     prob_bull = round((skor_bull / total) * 100)
     prob_bear = 100 - prob_bull
-    
     if prob_bull < 10:
         prob_bull = 10
         prob_bear = 90
     elif prob_bear < 10:
         prob_bear = 10
         prob_bull = 90
-    
     return prob_bull, prob_bear, trend, ket
 
 def hitung_risk_sentiment(dxy_chg, yield_chg):
@@ -250,7 +230,6 @@ def hitung_risk_sentiment(dxy_chg, yield_chg):
         skor += dxy_chg * 10
     if yield_chg is not None:
         skor += yield_chg * 5
-    
     if skor > 5:
         return "RISK-OFF", "DXY & Yield naik -> bullish gold"
     elif skor < -5:
@@ -281,32 +260,21 @@ def hitung_saran_trading(prob_bull, prob_bear, harga_sekarang, bull_ob, bear_ob)
         tp2 = entry - 40
     else:
         return None
-    
     rr = abs(tp1 - entry) / abs(sl - entry) if abs(sl - entry) > 0 else 0
-    
-    return {
-        "bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
-        "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)
-    }
+    return {"bias": bias, "entry": round(entry, 2), "sl": round(sl, 2),
+            "tp1": round(tp1, 2), "tp2": round(tp2, 2), "rr": round(rr, 2)}
 
 def backtest(data, prob_bull, prob_bear):
-    """Backtest sederhana: hitung win rate 30 hari terakhir"""
     if len(data) < 30:
         return None
-    
     menang = 0
     total = 0
-    benar_bull = 0
-    
     if prob_bull >= 60:
         bias = "BULLISH"
-        benar_bull = 1
     elif prob_bear >= 60:
         bias = "BEARISH"
-        benar_bull = 0
     else:
         return None
-    
     for i in range(1, min(30, len(data))):
         perubahan = data[-i]["close"] - data[-i-1]["close"]
         if bias == "BULLISH" and perubahan > 0:
@@ -314,12 +282,58 @@ def backtest(data, prob_bull, prob_bear):
         elif bias == "BEARISH" and perubahan < 0:
             menang += 1
         total += 1
-    
     if total == 0:
         return None
-    
-    win_rate = round((menang / total) * 100)
-    return win_rate
+    return round((menang / total) * 100)
+
+def bikin_chart(data, bull_ob, bear_ob, nama_file="chart_gold.png"):
+    """Generate chart Gold dengan OB"""
+    if len(data) < 10:
+        return None
+    try:
+        closes = [d["close"] for d in data[-50:]]
+        highs = [d["high"] for d in data[-50:]]
+        lows = [d["low"] for d in data[-50:]]
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(closes, label="Close", color="blue", linewidth=1.5)
+        ax.plot(highs, label="High", color="green", linewidth=0.8, alpha=0.5)
+        ax.plot(lows, label="Low", color="red", linewidth=0.8, alpha=0.5)
+        
+        # Bullish OB
+        if bull_ob:
+            ob = bull_ob[-1]
+            ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="green", label="Bullish OB")
+        
+        # Bearish OB
+        if bear_ob:
+            ob = bear_ob[-1]
+            ax.axhspan(ob["bawah"], ob["atas"], alpha=0.2, color="red", label="Bearish OB")
+        
+        ax.set_title("Gold (XAUUSD) H1 - 50 Candle Terakhir")
+        ax.set_ylabel("Harga (USD)")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(nama_file, dpi=80)
+        plt.close()
+        return nama_file
+    except Exception as e:
+        print(f"Error chart: {e}")
+        return None
+
+def kirim_foto_telegram(path_foto, caption=""):
+    """Kirim foto ke Telegram"""
+    url = "https://api.telegram.org/bot" + TOKEN + "/sendPhoto"
+    try:
+        with open(path_foto, "rb") as f:
+            files = {"photo": f}
+            data = {"chat_id": CHAT_ID, "caption": caption}
+            r = requests.post(url, files=files, data=data, timeout=30)
+            return r.status_code == 200
+    except:
+        return False
 
 # ============ MAIN ============
 print("Ambil data...")
@@ -334,7 +348,6 @@ data_d1 = ambil_ohlc("GC=F", interval="1d", range_="6mo")
 
 print("Ambil berita + AI...")
 berita_list = ambil_berita_gold()
-print(f"Berita: {len(berita_list)}")
 
 prob_d1_bull, prob_d1_bear, trend_d1, _ = probabilitas_tf(data_d1, "D1")
 prob_h4_bull, prob_h4_bear, trend_h4, _ = probabilitas_tf(data_h4, "H4")
@@ -348,6 +361,11 @@ risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 bull_ob_h4, bear_ob_h4 = deteksi_ob(data_h4)
 saran = hitung_saran_trading(prob_bull_total, prob_bear_total, gold, bull_ob_h4, bear_ob_h4)
 win_rate = backtest(data_d1, prob_bull_total, prob_bear_total)
+
+# Generate chart
+print("Generate chart...")
+bull_ob_h1, bear_ob_h1 = deteksi_ob(data_h1)
+chart_path = bikin_chart(data_h1, bull_ob_h1, bear_ob_h1)
 
 # ============ SUSUN PESAN ============
 tanggal = datetime.now().strftime("%d %B %Y")
@@ -404,13 +422,17 @@ if saran:
 
 if berita_list:
     pesan += "---\n\n"
-    pesan += "📰 *BERITA GOLD (AI Analysis):*\n\n"
+    pesan += "📰 *BERITA GOLD:*\n\n"
     for b in berita_list:
         pesan += f"{b['sentimen']}\n{b['judul'][:80]}...\n\n"
 
 pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 
 # ============ KIRIM ============
+if chart_path:
+    print("Kirim chart...")
+    kirim_foto_telegram(chart_path, caption="📈 Chart Gold H1")
+
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"})
 print("Terkirim!" if r.status_code == 200 else f"Gagal: {r.json()}")
