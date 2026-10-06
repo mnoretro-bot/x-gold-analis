@@ -1,4 +1,4 @@
-import json
++import json
 import requests
 import feedparser
 import os
@@ -598,6 +598,62 @@ Maksimal 500 kata. Gunakan istilah teknis tepat. Analisis mendalam, bukan dangka
     return None
 
 
+def hitung_risk_calculator(hasil_pairs, balance, risk_persen):
+    """Hitung position sizing berdasarkan risk %"""
+    if not balance or not risk_persen:
+        return None
+    
+    risk_amount = balance * (risk_persen / 100)
+    hasil = {
+        "balance": balance,
+        "risk_persen": risk_persen,
+        "risk_amount": round(risk_amount, 2),
+        "pairs": []
+    }
+    
+    # Cuma hitung top 3 pair
+    for kode, h in list(hasil_pairs.items())[:3]:
+        if not h["harga"]:
+            continue
+        
+        # Ambil OB terakhir sebagai SL
+        if h["prob_bull"] > h["prob_bear"]:
+            bias = "BUY"
+            entry = h["harga"]
+            sl = entry * 0.99  # SL 1% di bawah
+            tp = entry * 1.02  # TP 2% di atas
+        else:
+            bias = "SELL"
+            entry = h["harga"]
+            sl = entry * 1.01  # SL 1% di atas
+            tp = entry * 0.98  # TP 2% di bawah
+        
+        # Hitung risk per unit
+        risk_per_unit = abs(entry - sl)
+        if risk_per_unit == 0:
+            continue
+        
+        # Position size = risk_amount / risk_per_unit
+        position_size = risk_amount / risk_per_unit
+        
+        # RR
+        reward = abs(tp - entry)
+        rr = round(reward / risk_per_unit, 2) if risk_per_unit > 0 else 0
+        
+        hasil["pairs"].append({
+            "kode": kode,
+            "nama": h["nama"],
+            "emoji": h["emoji"],
+            "bias": bias,
+            "entry": round(entry, 4),
+            "sl": round(sl, 4),
+            "tp": round(tp, 4),
+            "position_size": round(position_size, 4),
+            "rr": rr,
+            "prob": max(h["prob_bull"], h["prob_bear"])
+        })
+    
+    return hasil
 # ============ MAIN ============
 print("Ambil data multi-pair...")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
@@ -785,17 +841,23 @@ for k1, k2, kor in korelasi_list[:5]:
 pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
 risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
+pesan += f"🎯 {risk_sent}\n"
+pesan += f"📝 {risk_ket}\n\n"
 
 print("Analisis profesor...")
 analisis_deep = analisis_profesor(hasil_pairs, mtf_results, korelasi_list, dxy, dxy_chg, yield10, yield_chg, risk_sent, berita_list)
+# ============ RISK CALCULATOR ============
+BALANCE = float(os.environ.get("BALANCE", "1000"))
+RISK_PERSEN = float(os.environ.get("RISK_PERSEN", "1"))
+
+print("Hitung risk calculator...")
+risk_calc = hitung_risk_calculator(hasil_pairs, BALANCE, RISK_PERSEN)
 print("Simpan sentimen history...")
 simpan_sentimen_history(hasil_pairs, tanggal, GIST_ID, TOKEN_GIST)
 
 print("Baca history...")
 history = baca_sentimen_history(GIST_ID, TOKEN_GIST)
 print(f"History: {len(history)} hari")
-pesan += f"🎯 {risk_sent}\n"
-pesan += f"📝 {risk_ket}\n\n"
 
 if kalender:
     pesan += "---\n\n"
@@ -911,21 +973,23 @@ r_journal = requests.post(url_tg, data={
 })
 print("Journal terkirim!" if r_journal.status_code == 200 else f"Journal gagal")
 
-# Kirim analisis profesor
-if analisis_deep:
-    pesan_prof = "🎓 *ANALISIS PROFESOR*\n\n" + analisis_deep + "\n\n⚠️ _Bukan jaminan profit. DYOR._"
-    max_len_p = 4000
-    pot_p = []
-    while len(pesan_prof) > max_len_p:
-        idx = pesan_prof.rfind("\n", 0, max_len_p)
-        if idx == -1:
-            idx = max_len_p
-        pot_p.append(pesan_prof[:idx])
-        pesan_prof = pesan_prof[idx:].lstrip()
-    pot_p.append(pesan_prof)
-    for i, bagian in enumerate(pot_p):
-        r_p = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
-        print(f"Profesor bagian {i+1} terkirim!" if r_p.status_code == 200 else f"Gagal")
+# Kirim risk calculator
+if risk_calc:
+    pesan_risk = "🧮 *RISK CALCULATOR*\n\n"
+    pesan_risk += f"💼 Balance: ${risk_calc['balance']}\n"
+    pesan_risk += f"⚠️ Risk: {risk_calc['risk_persen']}% = ${risk_calc['risk_amount']}\n\n"
+    pesan_risk += "📊 *POSITION SIZING:*\n\n"
+    for p in risk_calc["pairs"]:
+        pesan_risk += f"{p['emoji']} *{p['nama']}*\n"
+        pesan_risk += f"🎯 {p['bias']} ({p['prob']}%)\n"
+        pesan_risk += f"📍 Entry: {p['entry']}\n"
+        pesan_risk += f"🛑 SL: {p['sl']}\n"
+        pesan_risk += f"🎯 TP: {p['tp']}\n"
+        pesan_risk += f"📦 Size: {p['position_size']}\n"
+        pesan_risk += f"📊 RR: 1:{p['rr']}\n\n"
+    r_risk = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan_risk, "parse_mode": "Markdown"})
+    print("Risk calculator terkirim!" if r_risk.status_code == 200 else "Risk gagal")
+
 # Kirim tren sentimen
 if history and len(history) >= 3:
     pesan_tren = "📊 *TREN SENTIMEN (7 HARI)*\n\n"
