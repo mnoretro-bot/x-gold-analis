@@ -1,3 +1,4 @@
+import json
 import requests
 import feedparser
 import os
@@ -602,6 +603,53 @@ print("Ambil data multi-pair...")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
 yield10, yield_chg = ambil_harga("^TNX")
 
+
+GIST_ID = os.environ.get("GIST_ID")
+TOKEN_GIST = os.environ.get("TOKEN_GIST")
+
+def simpan_sentimen_history(hasil_pairs, tanggal, gist_id, github_token):
+    if not gist_id or not github_token:
+        return False
+    url = f"https://api.github.com/gists/{gist_id}"
+    headers = {"Authorization": "token " + github_token, "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        gist = r.json()
+        content = gist["files"]["sentimen_history.json"]["content"]
+        history = json.loads(content) if content.strip() else []
+    except:
+        history = []
+    data_hari_ini = {"tanggal": tanggal, "pairs": {}}
+    for kode, h in hasil_pairs.items():
+        data_hari_ini["pairs"][kode] = {
+            "bias": "BUY" if h["prob_bull"] > h["prob_bear"] else "SELL",
+            "prob_bull": h["prob_bull"],
+            "prob_bear": h["prob_bear"],
+            "harga": h["harga"]
+        }
+    history.append(data_hari_ini)
+    if len(history) > 30:
+        history = history[-30:]
+    data = {"files": {"sentimen_history.json": {"content": json.dumps(history, indent=2)}}}
+    try:
+        r = requests.patch(url, headers=headers, json=data, timeout=15)
+        return r.status_code == 200
+    except:
+        return False
+
+def baca_sentimen_history(gist_id, github_token):
+    if not gist_id or not github_token:
+        return []
+    url = f"https://api.github.com/gists/{gist_id}"
+    headers = {"Authorization": "token " + github_token, "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers, timeout=15)
+        gist = r.json()
+        content = gist["files"]["sentimen_history.json"]["content"]
+        return json.loads(content) if content.strip() else []
+    except:
+        return []
+
 hasil_pairs = {}
 data_pairs = {}
 mtf_results = {}
@@ -740,6 +788,12 @@ risk_sent, risk_ket = hitung_risk_sentiment(dxy_chg, yield_chg)
 
 print("Analisis profesor...")
 analisis_deep = analisis_profesor(hasil_pairs, mtf_results, korelasi_list, dxy, dxy_chg, yield10, yield_chg, risk_sent, berita_list)
+print("Simpan sentimen history...")
+simpan_sentimen_history(hasil_pairs, tanggal, GIST_ID, TOKEN_GIST)
+
+print("Baca history...")
+history = baca_sentimen_history(GIST_ID, TOKEN_GIST)
+print(f"History: {len(history)} hari")
 pesan += f"🎯 {risk_sent}\n"
 pesan += f"📝 {risk_ket}\n\n"
 
@@ -872,4 +926,20 @@ if analisis_deep:
     for i, bagian in enumerate(pot_p):
         r_p = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": bagian, "parse_mode": "Markdown"})
         print(f"Profesor bagian {i+1} terkirim!" if r_p.status_code == 200 else f"Gagal")
+# Kirim tren sentimen
+if history and len(history) >= 3:
+    pesan_tren = "📊 *TREN SENTIMEN (7 HARI)*\n\n"
+    for hari_data in history[-7:]:
+        tgl = hari_data["tanggal"]
+        pesan_tren += f"📅 *{tgl}*\n"
+        for kode in ["GOLD", "OIL", "BTC", "SP500"]:
+            if kode in hari_data["pairs"]:
+                p = hari_data["pairs"][kode]
+                emoji = PAIRS[kode]["emoji"]
+                bias = "🟢" if p["bias"] == "BUY" else "🔴"
+                pesan_tren += f"  {emoji} {bias} {p['prob_bull']}/{p['prob_bear']}\n"
+        pesan_tren += "\n"
+    r_tren = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan_tren, "parse_mode": "Markdown"})
+    print("Tren sentimen terkirim!" if r_tren.status_code == 200 else "Tren gagal")
+
 print("Selesai!")
