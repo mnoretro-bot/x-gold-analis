@@ -363,6 +363,58 @@ def kirim_foto_telegram(path_foto, caption=""):
     except:
         return False
 
+def buat_weekly_report(hasil_pairs, dxy, dxy_chg, yield10, yield_chg):
+    """Bikin laporan mingguan"""
+    if not GROQ_KEY:
+        return None
+    
+    # Ranking aset
+    ranking_bull = sorted(hasil_pairs.items(), key=lambda x: x[1]["prob_bull"], reverse=True)
+    ranking_bear = sorted(hasil_pairs.items(), key=lambda x: x[1]["prob_bear"], reverse=True)
+    
+    # Top 3 bullish & bearish
+    top_bull = ranking_bull[:3]
+    top_bear = ranking_bear[:3]
+    
+    # Prompt AI
+    prompt = f"""Kamu analis trading profesional. Buat laporan mingguan singkat (maks 200 kata) berdasarkan data ini:
+
+DXY: {round(dxy, 2) if dxy else 'N/A'} ({round(dxy_chg, 2) if dxy_chg else 'N/A'}%)
+US 10Y: {round(yield10, 3) if yield10 else 'N/A'}% ({round(yield_chg, 3) if yield_chg else 'N/A'}%)
+
+Top 3 Bullish:
+"""
+    for kode, h in top_bull:
+        prompt += f"- {h['nama']}: {h['prob_bull']}% bullish\n"
+    
+    prompt += "\nTop 3 Bearish:\n"
+    for kode, h in top_bear:
+        prompt += f"- {h['nama']}: {h['prob_bear']}% bearish\n"
+    
+    prompt += """
+Buat laporan:
+1. Ringkasan mingguan (2 baris)
+2. Aset paling menarik minggu ini
+3. Prediksi minggu depan
+4. Rekomendasi fokus
+
+Bahasa Indonesia, singkat, to the point."""
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": "Bearer " + GROQ_KEY, "Content-Type": "application/json"}
+    data = {
+        "model": "openai/gpt-oss-20b",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=30)
+        hasil = r.json()
+        if "choices" in hasil:
+            return hasil["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"Error weekly report: {e}")
+    return None
+
 # ============ MAIN ============
 print("Ambil data multi-pair...")
 dxy, dxy_chg = ambil_harga("DX-Y.NYB")
@@ -398,23 +450,15 @@ kalender = ambil_kalender_ekonomi()
 
 # Korelasi
 korelasi_gold_dxy = None
-korelasi_gold_oil = None
-korelasi_gold_btc = None
-
 if data_pairs.get("GOLD"):
     dxy_data = ambil_ohlc("DX-Y.NYB", interval="1d", range_="6mo")
     if dxy_data:
         korelasi_gold_dxy = hitung_korelasi(data_pairs["GOLD"], dxy_data)
-if data_pairs.get("GOLD") and data_pairs.get("OIL"):
-    korelasi_gold_oil = hitung_korelasi(data_pairs["GOLD"], data_pairs["OIL"])
-if data_pairs.get("GOLD") and data_pairs.get("BTC"):
-    korelasi_gold_btc = hitung_korelasi(data_pairs["GOLD"], data_pairs["BTC"])
 
 # ============ CEK ALERT ============
 alert_khusus = None
 alert_rr = None
 
-# Alert probabilitas > 80%
 for kode, h in hasil_pairs.items():
     if h["prob_bull"] >= 80:
         alert_khusus = f"🚨🚨🚨 *ALERT SINYAL KUAT* 🚨🚨🚨\n\n{h['emoji']} {h['nama']}: *STRONG BULLISH {h['prob_bull']}%!*"
@@ -423,23 +467,11 @@ for kode, h in hasil_pairs.items():
         alert_khusus = f"🚨🚨🚨 *ALERT SINYAL KUAT* 🚨🚨🚨\n\n{h['emoji']} {h['nama']}: *STRONG BEARISH {h['prob_bear']}%!*"
         break
 
-# Alert BOS/MSS Gold
-if not alert_khusus and hasil_pairs.get("GOLD"):
-    g = hasil_pairs["GOLD"]
-    if g.get("bos"):
-        alert_khusus = f"🔔 *ALERT BOS GOLD:*\n{g['bos']}"
-    elif g.get("mss"):
-        alert_khusus = f"🚨 *ALERT MSS GOLD:*\n{g['mss']}"
+# ============ CEK HARI MINGGU ============
+hari_ini = datetime.now().strftime("%A")
+is_minggu = hari_ini == "Sunday"
 
-# Alert RR > 1:3 untuk Gold
-if hasil_pairs.get("GOLD") and hasil_pairs["GOLD"]["harga"]:
-    g = hasil_pairs["GOLD"]
-    bull_ob_h4, bear_ob_h4 = deteksi_ob(gabung_h4(ambil_ohlc("GC=F", "1h", "1mo")))
-    saran = hitung_saran_trading(g["prob_bull"], g["prob_bear"], g["harga"], bull_ob_h4, bear_ob_h4)
-    if saran and saran["rr"] >= 3:
-        alert_rr = f"🔥🔥 *SETUP BAGUS!* 🔥🔥\n\n🥇 GOLD: *{saran['bias']}*\n📍 Entry: ${saran['entry']}\n🛑 SL: ${saran['sl']}\n🎯 TP1: ${saran['tp1']}\n📊 RR: 1:{saran['rr']}\n🎯 Probabilitas: {g['prob_bear'] if saran['bias']=='SELL' else g['prob_bull']}%"
-
-# ============ SUSUN PESAN ============
+# ============ SUSUN PESAN UTAMA ============
 tanggal = datetime.now().strftime("%d %B %Y")
 pesan = "📊 *MULTI-PAIR ANALYSIS*\n"
 pesan += f"📅 {tanggal}\n\n"
@@ -467,10 +499,6 @@ pesan += "---\n\n"
 pesan += "📊 *KORELASI GOLD:*\n\n"
 if korelasi_gold_dxy is not None:
     pesan += f"• Gold vs DXY: {korelasi_gold_dxy}\n"
-if korelasi_gold_oil is not None:
-    pesan += f"• Gold vs Oil: {korelasi_gold_oil}\n"
-if korelasi_gold_btc is not None:
-    pesan += f"• Gold vs BTC: {korelasi_gold_btc}\n"
 
 pesan += "\n---\n\n"
 pesan += "🌍 *RISK SENTIMENT:*\n"
@@ -497,17 +525,9 @@ pesan += "⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
 # Kirim alert terpisah
 if alert_khusus:
     url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
-    r_alert = requests.post(url_alert, data={
+    requests.post(url_alert, data={
         "chat_id": CHAT_ID, "text": alert_khusus, "parse_mode": "Markdown"
     })
-    print("Alert terkirim!" if r_alert.status_code == 200 else f"Alert gagal")
-
-if alert_rr:
-    url_alert = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
-    r_alert = requests.post(url_alert, data={
-        "chat_id": CHAT_ID, "text": alert_rr, "parse_mode": "Markdown"
-    })
-    print("Alert RR terkirim!" if r_alert.status_code == 200 else f"Alert RR gagal")
 
 # Kirim chart
 if data_pairs.get("GOLD"):
@@ -519,4 +539,20 @@ if data_pairs.get("GOLD"):
 url_tg = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
 r = requests.post(url_tg, data={"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"})
 print("Terkirim!" if r.status_code == 200 else f"Gagal: {r.json()}")
+
+# ============ WEEKLY REPORT (Kalau Minggu) ============
+if is_minggu:
+    print("Hari Minggu! Bikin weekly report...")
+    weekly = buat_weekly_report(hasil_pairs, dxy, dxy_chg, yield10, yield_chg)
+    if weekly:
+        pesan_weekly = "📅 *WEEKLY REPORT*\n"
+        pesan_weekly += f"📆 {tanggal}\n\n"
+        pesan_weekly += weekly
+        pesan_weekly += "\n\n⚠️ _Disclaimer: Bukan jaminan profit. DYOR._"
+        
+        r_weekly = requests.post(url_tg, data={
+            "chat_id": CHAT_ID, "text": pesan_weekly, "parse_mode": "Markdown"
+        })
+        print("Weekly report terkirim!" if r_weekly.status_code == 200 else "Weekly gagal")
+
 print("Selesai!")
